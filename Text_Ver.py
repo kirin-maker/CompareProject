@@ -4,6 +4,8 @@ from tkinter import ttk, messagebox
 import pyperclip
 import re
 from deepdiff import DeepDiff
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
 # ----------------- JSON Utility -----------------
 def remove_description(obj):
@@ -258,7 +260,81 @@ def compare_json():
     total_diff = sum(len(diff[section]) for section in diff)
     label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {total_diff} จุด")
 
+def export_to_excel():
+    try:
+        base_data = json.loads(text_base.get("1.0", tk.END))
+        compare_data = json.loads(text_compare.get("1.0", tk.END))
+    except json.JSONDecodeError as e:
+        messagebox.showerror("รูปแบบ JSON ไม่ถูกต้อง", str(e))
+        return
 
+    remove_description(base_data)
+    remove_description(compare_data)
+
+    base_filtered = filter_out_debug(base_data)
+    compare_filtered = filter_out_debug(compare_data)
+
+    diff = DeepDiff(base_filtered, compare_filtered, ignore_order=False, report_repetition=True, view="tree")
+
+    path_list = []
+    for section in diff:
+        for change in diff[section]:
+            if hasattr(change, 'path'):
+                path = change.path(output_format='list')
+                s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
+                path_list.append(s)
+
+    partial_base = build_partial_json(base_filtered, path_list)
+    partial_compare = build_partial_json(compare_filtered, path_list)
+
+    fill_missing_promo_numbers(partial_base, base_filtered)
+    fill_missing_promo_numbers(partial_compare, compare_filtered)
+
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    promos_base = partial_base.get("promoInfo", [])
+    promos_compare = partial_compare.get("promoInfo", [])
+
+    promo_dict = {}
+    for promo in promos_base:
+        promo_dict[promo.get("promoNumber", "N/A")] = {"base": promo, "compare": {}}
+    for promo in promos_compare:
+        promo_dict.setdefault(promo.get("promoNumber", "N/A"), {}).update({"compare": promo})
+
+    highlight_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
+    for promo_num, data in promo_dict.items():
+        ws = wb.create_sheet(title=str(promo_num))
+        ws.append(["Field", "Base", "Compare"])
+
+        def recursive_write(base, compare, prefix=""):
+            if isinstance(base, dict) or isinstance(compare, dict):
+                all_keys = set(base.keys() if isinstance(base, dict) else []).union(compare.keys() if isinstance(compare, dict) else [])
+                for key in sorted(all_keys):
+                    b = base.get(key, "") if isinstance(base, dict) else ""
+                    c = compare.get(key, "") if isinstance(compare, dict) else ""
+                    recursive_write(b, c, f"{prefix}{key}.")
+            elif isinstance(base, list) or isinstance(compare, list):
+                max_len = max(len(base) if isinstance(base, list) else 0, len(compare) if isinstance(compare, list) else 0)
+                for i in range(max_len):
+                    b = base[i] if isinstance(base, list) and i < len(base) else ""
+                    c = compare[i] if isinstance(compare, list) and i < len(compare) else ""
+                    recursive_write(b, c, f"{prefix}[{i}].")
+            else:
+                row = [prefix.rstrip("."), base, compare]
+                ws.append(row)
+                if base != compare:
+                    for col in range(1, 4):
+                        ws.cell(row=ws.max_row, column=col).fill = highlight_fill
+
+        recursive_write(data.get("base", {}), data.get("compare", {}))
+
+    try:
+        wb.save("JSON_Comparison_Result.xlsx")
+        label_result.config(text="✅ บันทึกไฟล์ Excel แล้ว: JSON_Comparison_Result.xlsx", foreground="#66ff99")
+    except Exception as e:
+        messagebox.showerror("Save Error", f"ไม่สามารถบันทึกไฟล์ได้: {e}")
 # ----------------- GUI -----------------
 root = tk.Tk()
 root.title("🧠 JSON Compare Tool")
@@ -332,6 +408,7 @@ frame_copy = ttk.Frame(root)
 frame_copy.grid(row=4, column=0)
 ttk.Button(frame_copy, text="📋 Copy Compare Diff", command=lambda: copy_text(text_partial_compare)).pack(side="left", padx=15)
 ttk.Button(frame_copy, text="📋 Copy Base Diff", command=lambda: copy_text(text_partial_base)).pack(side="left", padx=15)
+ttk.Button(frame_copy, text="📤 Export Excel", command=export_to_excel).pack(side="left", padx=15)  # สร้างปุ่มหลัง frame_copy สร้างแล้ว
 
 frame_output = ttk.Frame(root)
 frame_output.grid(row=5, column=0, sticky="nsew", padx=10, pady=(0,10))
