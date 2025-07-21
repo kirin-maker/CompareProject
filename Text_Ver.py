@@ -176,44 +176,97 @@ def compare_json():
 
     remove_description(base_data)
     remove_description(compare_data)
+
     base_filtered = filter_out_debug(base_data)
     compare_filtered = filter_out_debug(compare_data)
-    diff = DeepDiff(base_filtered, compare_filtered, ignore_order=False, report_repetition=True, view="tree")
-    if not diff:
-        label_result.config(text="✅ ไม่มีความแตกต่างระหว่าง JSON ทั้งสองไฟล์")
-        text_partial_base.delete("1.0", tk.END)
-        text_partial_compare.delete("1.0", tk.END)
-        return
 
-    path_list = []
-    for section in diff:
-        for change in diff[section]:
-            if hasattr(change, 'path'):
-                p = change.path(output_format='list')
-                path_list.append("".join(f"[{x}]" if isinstance(x, int) else f"['{x}']" for x in p))
+    base_promos = {p["promoNumber"]: p for p in base_filtered.get("promoInfo", []) if "promoNumber" in p}
+    compare_promos = {p["promoNumber"]: p for p in compare_filtered.get("promoInfo", []) if "promoNumber" in p}
 
-    partial_base = build_partial_json(base_filtered, path_list)
-    partial_compare = build_partial_json(compare_filtered, path_list)
-    fill_missing_promo_numbers(partial_base, base_filtered)
-    fill_missing_promo_numbers(partial_compare, compare_filtered)
+    partial_base_result = {"promoInfo": []}
+    partial_compare_result = {"promoInfo": []}
+    total_diff_paths = []
+
+    # ==== เปรียบเทียบ promoInfo ตาม promoNumber ====
+    common_promo_numbers = sorted(set(base_promos.keys()) & set(compare_promos.keys()), key=lambda x: int(x))
+
+    for promo_num in common_promo_numbers:
+        base_promo = base_promos[promo_num]
+        compare_promo = compare_promos[promo_num]
+
+        diff = DeepDiff(base_promo, compare_promo, ignore_order=False, report_repetition=True, view="tree")
+
+        if not diff:
+            continue
+
+        path_list = []
+        for section in diff:
+            for change in diff[section]:
+                if hasattr(change, 'path'):
+                    path = change.path(output_format='list')
+                    s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
+                    path_list.append(s)
+
+        total_diff_paths.extend([f"['promoInfo'][{len(partial_base_result['promoInfo'])}]{p}" for p in path_list])
+
+        partial_base = build_partial_json(base_promo, path_list)
+        partial_base["promoNumber"] = promo_num
+        partial_base_result["promoInfo"].append(partial_base)
+
+        partial_compare = build_partial_json(compare_promo, path_list)
+        partial_compare["promoNumber"] = promo_num
+        partial_compare_result["promoInfo"].append(partial_compare)
+
+    # ==== เปรียบเทียบฟิลด์อื่น ๆ ที่ไม่ใช่ promoInfo ====
+    other_keys = set(base_filtered.keys()) | set(compare_filtered.keys())
+    other_keys.discard("promoInfo")
+
+    for key in sorted(other_keys):
+        if key not in base_filtered or key not in compare_filtered:
+            continue  # skip if key missing in one side
+
+        diff = DeepDiff(base_filtered[key], compare_filtered[key], ignore_order=False, report_repetition=True, view="tree")
+
+        if not diff:
+            continue
+
+        path_list = []
+        for section in diff:
+            for change in diff[section]:
+                if hasattr(change, 'path'):
+                    path = change.path(output_format='list')
+                    s = f"['{key}']" + "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
+                    path_list.append(s)
+
+        total_diff_paths.extend(path_list)
+
+        partial_base = build_partial_json(base_filtered, path_list)
+        partial_compare = build_partial_json(compare_filtered, path_list)
+
+        partial_base_result.update(partial_base)
+        partial_compare_result.update(partial_compare)
+
+    # ==== สร้างผลลัพธ์และแสดงผล ====
+    base_result = format_full_output(partial_base_result)
+    compare_result = format_full_output(partial_compare_result)
 
     text_partial_base.delete("1.0", tk.END)
     text_partial_compare.delete("1.0", tk.END)
-    text_partial_base.insert(tk.END, format_full_output(partial_base))
-    text_partial_compare.insert(tk.END, format_full_output(partial_compare))
+    text_partial_base.insert(tk.END, base_result)
+    text_partial_compare.insert(tk.END, compare_result)
 
     highlight_promo_lines(text_partial_base)
     highlight_promo_lines(text_partial_compare)
-    highlight_differences(text_partial_base, path_list)
-    highlight_differences(text_partial_compare, path_list)
+    highlight_differences(text_partial_base, total_diff_paths)
+    highlight_differences(text_partial_compare, total_diff_paths)
 
-    total_diff = sum(len(diff[sec]) for sec in diff)
-    label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {total_diff} จุด")
+    label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {len(total_diff_paths)} จุด")
+ 
 
 def export_to_excel():
     try:
-        base_data = json.loads(text_base.get("1.0", tk.END))
-        compare_data = json.loads(text_compare.get("1.0", tk.END))
+        base_data = json.loads(text_base.get("4.0", tk.END))
+        compare_data = json.loads(text_compare.get("4.0", tk.END))
     except json.JSONDecodeError as e:
         messagebox.showerror("รูปแบบ JSON ไม่ถูกต้อง", str(e))
         return
@@ -236,7 +289,7 @@ def export_to_excel():
     fill_missing_promo_numbers(partial_base, base_filtered)
     fill_missing_promo_numbers(partial_compare, compare_filtered)
 
-    filename = os.path.expanduser(r"C:\Users\natth\OneDrive\compare_test.xlsx")
+    filename = os.path.expanduser(r"C:\Users\Admin\Desktop\CompareProject\Compare_Test\Compare_test.xlsx")
     sheet_name = "CompareDiff"
 
     if os.path.exists(filename):
@@ -252,20 +305,17 @@ def export_to_excel():
         ws = wb.create_sheet(title=sheet_name)
 
     # Style
-    # Highlight style: only value cell (not full row)
-    highlight_fill_value = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")  # light orange
     header_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
-    promo_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+    highlight_fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
     thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
                          top=Side(style='thin'), bottom=Side(style='thin'))
 
-    promos_base = partial_base.get("promoInfo", [])
-    promos_compare = partial_compare.get("promoInfo", [])
-    promo_dict = {}
-    for promo in promos_base:
-        promo_dict[promo.get("promoNumber", "N/A")] = {"base": promo, "compare": {}}
-    for promo in promos_compare:
-        promo_dict.setdefault(promo.get("promoNumber", "N/A"), {}).update({"compare": promo})
+    # Header row
+    ws.append(["Key", "BasePro", "ComparePro"])
+    for col in range(1, 4):
+        ws.cell(row=1, column=col).fill = header_fill
+        ws.cell(row=1, column=col).border = thin_border
+        ws.cell(row=1, column=col).alignment = Alignment(horizontal='center', vertical='center')
 
     def recursive_diff(base, compare, prefix=""):
         """Return list of (field, base_val, compare_val) for all fields (only those that differ)"""
@@ -287,73 +337,16 @@ def export_to_excel():
                 result.append((prefix.rstrip("."), base, compare))
         return result
 
-    row_idx = 1
-    # Header row
-    ws.append(["", "Key", "Base", "Compare"])
-    for col in range(1, 5):
-        ws.cell(row=row_idx, column=col).fill = header_fill
-        ws.cell(row=row_idx, column=col).border = thin_border
-        ws.cell(row=row_idx, column=col).alignment = Alignment(vertical='top')
-    row_idx += 1
-
-    for promo_num, data in promo_dict.items():
-        # Header row: promoNumber (only col 1 has promoNumber, col 2/3 has promoNumber string)
-        ws.append([promo_num, f"========== promoNumber: {promo_num} ==========", "", ""])
-        for col in range(1, 5):
-            ws.cell(row=row_idx, column=col).fill = promo_fill
+    row_idx = 2
+    for diff_item in recursive_diff(partial_base, partial_compare):
+        key, base_val, compare_val = diff_item
+        ws.append([key, base_val, compare_val])
+        for col in range(1, 4):
             ws.cell(row=row_idx, column=col).border = thin_border
             ws.cell(row=row_idx, column=col).alignment = Alignment(vertical='top')
-        row_idx += 1
-
-        # Dump JSON (only diff part) for each side, but split key and value
-        def parse_json_lines(json_lines):
-            # Returns list of (indent, key, value) or (indent, '', line) for non-key lines
-            result = []
-            for line in json_lines:
-                indent = len(line) - len(line.lstrip(' '))
-                striped = line.strip()
-                if striped.startswith('"') and ':' in striped:
-                    key_part, val_part = striped.split(':', 1)
-                    key = key_part.strip().strip('"')
-                    value = val_part.strip().rstrip(',')
-                    result.append((indent, key, value))
-                else:
-                    result.append((indent, '', striped))
-            return result
-
-        base_json = data.get("base", {})
-        compare_json = data.get("compare", {})
-        base_lines = json.dumps(base_json, indent=2, ensure_ascii=False).splitlines()
-        compare_lines = json.dumps(compare_json, indent=2, ensure_ascii=False).splitlines()
-        base_parsed = parse_json_lines(base_lines)
-        compare_parsed = parse_json_lines(compare_lines)
-        max_lines = max(len(base_parsed), len(compare_parsed))
-
-        for i in range(max_lines):
-            base_item = base_parsed[i] if i < len(base_parsed) else (0, '', '')
-            compare_item = compare_parsed[i] if i < len(compare_parsed) else (0, '', '')
-            indent = max(base_item[0], compare_item[0])
-            key = base_item[1] or compare_item[1]
-            base_val = base_item[2] if base_item[1] else ''
-            compare_val = compare_item[2] if compare_item[1] else ''
-            # If not a key-value line, show as structure
-            if not key:
-                ws.append(["", "", base_item[2], compare_item[2]])
-            else:
-                ws.append(["", ' ' * indent + key, base_val, compare_val])
-            # Always set border and alignment
-            for col in range(1, 5):
-                ws.cell(row=row_idx, column=col).border = thin_border
-                ws.cell(row=row_idx, column=col).alignment = Alignment(vertical='top')
-            # Highlight only value cell if different
-            if key and base_val != compare_val:
-                if base_val != '':
-                    ws.cell(row=row_idx, column=3).fill = highlight_fill_value
-                if compare_val != '':
-                    ws.cell(row=row_idx, column=4).fill = highlight_fill_value
-            row_idx += 1
-        # Blank row between promos
-        ws.append(["", "", "", ""])
+        if base_val != compare_val:
+            ws.cell(row=row_idx, column=2).fill = highlight_fill
+            ws.cell(row=row_idx, column=3).fill = highlight_fill
         row_idx += 1
 
     try:
