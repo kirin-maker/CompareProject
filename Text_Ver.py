@@ -2,10 +2,10 @@ import json
 import tkinter as tk
 from tkinter import ttk, messagebox
 import re
-import os
 from deepdiff import DeepDiff
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import PatternFill, Border, Side, Alignment
+from openpyxl.styles import PatternFill
+import os
 
 # ----------------- JSON Utility -----------------
 def remove_description(obj):
@@ -165,7 +165,172 @@ def highlight_differences(text_widget, diff_paths):
             text_widget.tag_add("diff_highlight", f"{pos.split('.')[0]}.0", f"{pos.split('.')[0]}.end")
             start = f"{pos.split('.')[0]}.end"
 
-# ----------------- Core Functions -----------------
+# ----------------- Global Variables -----------------
+EXCEL_PATH = r"C:\Users\Admin\Desktop\CompareProject\Compare_Export\Compare_Export.xlsx"
+if not os.path.exists(os.path.dirname(EXCEL_PATH)):
+    os.makedirs(os.path.dirname(EXCEL_PATH))
+last_export_data = None  # เก็บผลลัพธ์ล่าสุดจาก compare_json
+
+# ----------------- Excel Export Utility -----------------
+def flatten_json(obj, prefix=""):
+    result = {}
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            full_key = f"{prefix}.{k}" if prefix else k
+            if isinstance(v, (dict, list)):
+                result.update(flatten_json(v, full_key))
+            else:
+                result[full_key] = v
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            full_key = f"{prefix}[{i}]"
+            if isinstance(item, (dict, list)):
+                result.update(flatten_json(item, full_key))
+            else:
+                result[full_key] = item
+    return result
+
+def export_to_excel():
+    """
+    ส่งออกผลการเปรียบเทียบเป็นไฟล์ Excel:
+      • แต่ละ promoInfo (dict หนึ่งตัวใน list) = 1 แถว (JSON block indent 2)
+      • ฝั่งที่ไม่มีข้อมูลในแถวนั้น เว้นว่าง
+      • ไฮไลต์แถวที่ต่างกันเป็นสีเหลือง
+      • คีย์อื่น ๆ นอก promoInfo เก็บไว้ในชีต “Others”
+    """
+    if not last_export_data:
+        messagebox.showwarning("ยังไม่มีข้อมูลเปรียบเทียบ",
+                               "กรุณาเปรียบเทียบ JSON ก่อนกด Export")
+        return
+
+    base_part, comp_part = last_export_data
+    diff_fill = PatternFill(start_color="FFFF00",
+                            end_color="FFFF00",
+                            fill_type="solid")
+
+    # --- เตรียมสมุดงาน ------------------------------------------------------
+    try:
+        if os.path.exists(EXCEL_PATH):
+            wb = load_workbook(EXCEL_PATH)
+        else:
+            wb = Workbook()
+            wb.remove(wb.active)          # ลบชีต default
+    except Exception as e:
+        messagebox.showerror("ไม่สามารถโหลดไฟล์ Excel", str(e))
+        return
+
+    # --- ฟังก์ชันเขียนข้อมูลลงหนึ่งชีต --------------------------------------
+    def write_sheet(ws, base_data: dict, comp_data: dict):
+        """
+        • แสดง JSON เป็น block แยกบรรทัด (line-by-line)
+        • จัดฝั่งซ้ายขวาให้เปรียบเทียบได้ง่าย
+        • ไฮไลต์เฉพาะบรรทัดที่แตกต่าง
+        """
+        def json_lines(data):
+            if not data:
+                return []
+            return json.dumps(data, indent=2, ensure_ascii=False).splitlines()
+
+        # ---------- promoInfo ----------
+        if "promoInfo" in base_data or "promoInfo" in comp_data:
+            base_promos = base_data.get("promoInfo", [])
+            comp_promos = comp_data.get("promoInfo", [])
+
+            max_len = max(len(base_promos), len(comp_promos))
+            ws.append(["compare_newpro (promoInfo)", "", "compare_online (promoInfo)"])
+
+            for i in range(max_len):
+                base_obj = base_promos[i] if i < len(base_promos) else {}
+                comp_obj = comp_promos[i] if i < len(comp_promos) else {}
+
+                base_lines = json_lines(base_obj)
+                comp_lines = json_lines(comp_obj)
+                max_lines = max(len(base_lines), len(comp_lines))
+
+                for j in range(max_lines):
+                    b_line = base_lines[j] if j < len(base_lines) else ""
+                    c_line = comp_lines[j] if j < len(comp_lines) else ""
+                    ws.append([b_line, "", c_line])
+
+                    row = ws.max_row
+                    if b_line != c_line:
+                        if b_line:
+                            ws.cell(row=row, column=1).fill = diff_fill
+                        if c_line:
+                            ws.cell(row=row, column=3).fill = diff_fill
+
+        # ---------- top-level keys ----------
+        other_keys = sorted(set(base_data.keys()) | set(comp_data.keys()) - {"promoInfo"})
+        if other_keys:
+            ws.append([])
+            ws.append(["compare_newpro (others)", "", "compare_online (others)"])
+
+        for key in other_keys:
+            base_val = base_data.get(key)
+            comp_val = comp_data.get(key)
+
+            base_lines = json_lines(base_val)
+            comp_lines = json_lines(comp_val)
+            max_lines = max(len(base_lines), len(comp_lines))
+
+            for j in range(max_lines):
+                b_line = base_lines[j] if j < len(base_lines) else ""
+                c_line = comp_lines[j] if j < len(comp_lines) else ""
+                ws.append([b_line, "", c_line])
+
+                row = ws.max_row
+                if b_line != c_line:
+                    if b_line:
+                        ws.cell(row=row, column=1).fill = diff_fill
+                    if c_line:
+                        ws.cell(row=row, column=3).fill = diff_fill
+
+        ws.column_dimensions["A"].width = 60
+        ws.column_dimensions["B"].width = 5
+        ws.column_dimensions["C"].width = 60
+
+
+    # --- สร้างชีตตาม promoNumber -------------------------------------------
+    base_promos = {p["promoNumber"]: p
+                   for p in base_part.get("promoInfo", [])
+                   if "promoNumber" in p}
+    comp_promos = {p["promoNumber"]: p
+                   for p in comp_part.get("promoInfo", [])
+                   if "promoNumber" in p}
+
+    all_promo_nums = sorted(set(base_promos) | set(comp_promos),
+                            key=lambda x: int(x) if str(x).isdigit() else str(x))
+
+    for promo_num in all_promo_nums:
+        sheet = str(promo_num)[:31]  # ชื่อชีตต้อง ≤ 31 ตัวอักษร
+        if sheet in wb.sheetnames:
+            del wb[sheet]
+        ws = wb.create_sheet(sheet)
+
+        write_sheet(ws,
+                    base_promos.get(promo_num, {}),
+                    comp_promos.get(promo_num, {}))
+
+    # --- ชีต Others ---------------------------------------------------------
+    others_base = {k: v for k, v in base_part.items() if k != "promoInfo"}
+    others_comp = {k: v for k, v in comp_part.items() if k != "promoInfo"}
+
+    if others_base or others_comp:
+        if "Others" in wb.sheetnames:
+            del wb["Others"]
+        ws_others = wb.create_sheet("Others")
+        write_sheet(ws_others, others_base, others_comp)
+
+    # --- บันทึก -------------------------------------------------------------
+    try:
+        wb.save(EXCEL_PATH)
+        messagebox.showinfo("ส่งออกสำเร็จ",
+                            f"ไฟล์ Excel ถูกบันทึกที่:\n{EXCEL_PATH}")
+    except PermissionError:
+        messagebox.showerror("ไม่สามารถบันทึก",
+                             "กรุณาปิดไฟล์ Excel ก่อนแล้วลองใหม่")
+
+# ----------------- Core Function: compare_json -----------------
 def compare_json():
     try:
         base_data = json.loads(text_base.get("1.0", tk.END))
@@ -217,13 +382,13 @@ def compare_json():
         partial_compare["promoNumber"] = promo_num
         partial_compare_result["promoInfo"].append(partial_compare)
 
-    # ==== เปรียบเทียบฟิลด์อื่น ๆ ที่ไม่ใช่ promoInfo ====
+    # ==== ฟิลด์อื่น ๆ ====
     other_keys = set(base_filtered.keys()) | set(compare_filtered.keys())
     other_keys.discard("promoInfo")
 
     for key in sorted(other_keys):
         if key not in base_filtered or key not in compare_filtered:
-            continue  # skip if key missing in one side
+            continue
 
         diff = DeepDiff(base_filtered[key], compare_filtered[key], ignore_order=False, report_repetition=True, view="tree")
 
@@ -246,7 +411,7 @@ def compare_json():
         partial_base_result.update(partial_base)
         partial_compare_result.update(partial_compare)
 
-    # ==== สร้างผลลัพธ์และแสดงผล ====
+    # ==== แสดงผลลัพธ์ใน GUI ====
     base_result = format_full_output(partial_base_result)
     compare_result = format_full_output(partial_compare_result)
 
@@ -260,100 +425,10 @@ def compare_json():
     highlight_differences(text_partial_base, total_diff_paths)
     highlight_differences(text_partial_compare, total_diff_paths)
 
+    global last_export_data
+    last_export_data = (partial_base_result, partial_compare_result)
+
     label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {len(total_diff_paths)} จุด")
- 
-
-def export_to_excel():
-    try:
-        base_data = json.loads(text_base.get("4.0", tk.END))
-        compare_data = json.loads(text_compare.get("4.0", tk.END))
-    except json.JSONDecodeError as e:
-        messagebox.showerror("รูปแบบ JSON ไม่ถูกต้อง", str(e))
-        return
-
-    remove_description(base_data)
-    remove_description(compare_data)
-    base_filtered = filter_out_debug(base_data)
-    compare_filtered = filter_out_debug(compare_data)
-    diff = DeepDiff(base_filtered, compare_filtered, ignore_order=False, report_repetition=True, view="tree")
-
-    path_list = []
-    for section in diff:
-        for change in diff[section]:
-            if hasattr(change, 'path'):
-                p = change.path(output_format='list')
-                path_list.append("".join(f"[{x}]" if isinstance(x, int) else f"['{x}']" for x in p))
-
-    partial_base = build_partial_json(base_filtered, path_list)
-    partial_compare = build_partial_json(compare_filtered, path_list)
-    fill_missing_promo_numbers(partial_base, base_filtered)
-    fill_missing_promo_numbers(partial_compare, compare_filtered)
-
-    filename = os.path.expanduser(r"C:\Users\Admin\Desktop\CompareProject\Compare_Test\Compare_test.xlsx")
-    sheet_name = "CompareDiff"
-
-    if os.path.exists(filename):
-        wb = load_workbook(filename)
-    else:
-        wb = Workbook()
-    if "Sheet" in wb.sheetnames and len(wb.sheetnames) == 1:
-        wb.remove(wb["Sheet"])
-    if sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        ws.delete_rows(1, ws.max_row)
-    else:
-        ws = wb.create_sheet(title=sheet_name)
-
-    # Style
-    header_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
-    highlight_fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
-    thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
-                         top=Side(style='thin'), bottom=Side(style='thin'))
-
-    # Header row
-    ws.append(["Key", "BasePro", "ComparePro"])
-    for col in range(1, 4):
-        ws.cell(row=1, column=col).fill = header_fill
-        ws.cell(row=1, column=col).border = thin_border
-        ws.cell(row=1, column=col).alignment = Alignment(horizontal='center', vertical='center')
-
-    def recursive_diff(base, compare, prefix=""):
-        """Return list of (field, base_val, compare_val) for all fields (only those that differ)"""
-        result = []
-        if isinstance(base, dict) or isinstance(compare, dict):
-            keys = set(base.keys() if isinstance(base, dict) else []).union(compare.keys() if isinstance(compare, dict) else [])
-            for key in sorted(keys):
-                b = base.get(key, "") if isinstance(base, dict) else ""
-                c = compare.get(key, "") if isinstance(compare, dict) else ""
-                result.extend(recursive_diff(b, c, f"{prefix}{key}."))
-        elif isinstance(base, list) or isinstance(compare, list):
-            max_len = max(len(base) if isinstance(base, list) else 0, len(compare) if isinstance(compare, list) else 0)
-            for i in range(max_len):
-                b = base[i] if isinstance(base, list) and i < len(base) else ""
-                c = compare[i] if isinstance(compare, list) and i < len(compare) else ""
-                result.extend(recursive_diff(b, c, f"{prefix}[{i}]."))
-        else:
-            if base != compare:
-                result.append((prefix.rstrip("."), base, compare))
-        return result
-
-    row_idx = 2
-    for diff_item in recursive_diff(partial_base, partial_compare):
-        key, base_val, compare_val = diff_item
-        ws.append([key, base_val, compare_val])
-        for col in range(1, 4):
-            ws.cell(row=row_idx, column=col).border = thin_border
-            ws.cell(row=row_idx, column=col).alignment = Alignment(vertical='top')
-        if base_val != compare_val:
-            ws.cell(row=row_idx, column=2).fill = highlight_fill
-            ws.cell(row=row_idx, column=3).fill = highlight_fill
-        row_idx += 1
-
-    try:
-        wb.save(filename)
-        label_result.config(text=f"✅ บันทึกไฟล์ Excel แล้ว: {os.path.abspath(filename)}", foreground="#66ff99")
-    except Exception as e:
-        messagebox.showerror("Save Error", f"ไม่สามารถบันทึกไฟล์ได้: {e}")
 
 # ----------------- GUI -----------------
 root = tk.Tk()
