@@ -166,9 +166,17 @@ def highlight_differences(text_widget, diff_paths):
             start = f"{pos.split('.')[0]}.end"
 
 # ----------------- Global Variables -----------------
-EXCEL_PATH = r"C:\Users\Admin\Desktop\CompareProject\Compare_Export\Compare_Export.xlsx"
-if not os.path.exists(os.path.dirname(EXCEL_PATH)):
-    os.makedirs(os.path.dirname(EXCEL_PATH))
+EXPORT_FOLDER = os.path.join(os.getcwd(), "export")
+EXCEL_PATH = os.path.join(EXPORT_FOLDER, "Compare_Export.xlsx")
+
+# ตรวจสอบและสร้างโฟลเดอร์ export หากยังไม่มี
+if not os.path.exists(EXPORT_FOLDER):
+    try:
+        os.makedirs(EXPORT_FOLDER)
+    except Exception as e:
+        messagebox.showerror("ไม่สามารถสร้างโฟลเดอร์", f"เกิดข้อผิดพลาดในการสร้างโฟลเดอร์:\n{e}")
+        raise
+
 last_export_data = None  # เก็บผลลัพธ์ล่าสุดจาก compare_json
 
 # ----------------- Excel Export Utility -----------------
@@ -438,6 +446,9 @@ def compare_json():
     highlight_promo_lines(text_partial_compare)
     highlight_differences(text_partial_base, total_diff_paths)
     highlight_differences(text_partial_compare, total_diff_paths)
+
+    global last_export_data
+    last_export_data = (partial_base_result, partial_compare_result)
 
     label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {len(total_diff_paths)} จุด")
  
