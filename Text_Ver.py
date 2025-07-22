@@ -331,6 +331,7 @@ def export_to_excel():
                              "กรุณาปิดไฟล์ Excel ก่อนแล้วลองใหม่")
 
 # ----------------- Core Function: compare_json -----------------
+
 def compare_json():
     try:
         base_data = json.loads(text_base.get("1.0", tk.END))
@@ -352,37 +353,50 @@ def compare_json():
     partial_compare_result = {"promoInfo": []}
     total_diff_paths = []
 
-    # ==== เปรียบเทียบ promoInfo ตาม promoNumber ====
-    common_promo_numbers = sorted(set(base_promos.keys()) & set(compare_promos.keys()), key=lambda x: int(x))
+    all_promo_numbers = sorted(set(base_promos.keys()) | set(compare_promos.keys()), key=lambda x: int(x))
 
-    for promo_num in common_promo_numbers:
-        base_promo = base_promos[promo_num]
-        compare_promo = compare_promos[promo_num]
+    for promo_num in all_promo_numbers:
+        base_promo = base_promos.get(promo_num)
+        compare_promo = compare_promos.get(promo_num)
 
-        diff = DeepDiff(base_promo, compare_promo, ignore_order=False, report_repetition=True, view="tree")
+        if base_promo and compare_promo:
+            # กรณีมีทั้งสองฝั่ง
+            diff = DeepDiff(base_promo, compare_promo, ignore_order=False, report_repetition=True, view="tree")
 
-        if not diff:
-            continue
+            if not diff:
+                continue  # ไม่มี diff ก็ไม่ต้องใส่
 
-        path_list = []
-        for section in diff:
-            for change in diff[section]:
-                if hasattr(change, 'path'):
-                    path = change.path(output_format='list')
-                    s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
-                    path_list.append(s)
+            path_list = []
+            for section in diff:
+                for change in diff[section]:
+                    if hasattr(change, 'path'):
+                        path = change.path(output_format='list')
+                        s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
+                        path_list.append(s)
 
-        total_diff_paths.extend([f"['promoInfo'][{len(partial_base_result['promoInfo'])}]{p}" for p in path_list])
+            total_diff_paths.extend([f"['promoInfo'][{len(partial_base_result['promoInfo'])}]{p}" for p in path_list])
 
-        partial_base = build_partial_json(base_promo, path_list)
-        partial_base["promoNumber"] = promo_num
+            partial_base = build_partial_json(base_promo, path_list)
+            partial_base["promoNumber"] = promo_num
+            partial_compare = build_partial_json(compare_promo, path_list)
+            partial_compare["promoNumber"] = promo_num
+
+        elif base_promo and not compare_promo:
+            # มีเฉพาะใน Base
+            partial_base = base_promo.copy()
+            partial_base["promoNumber"] = promo_num
+            partial_compare = {"promoNumber": promo_num}  # ว่างเปล่า
+
+        elif compare_promo and not base_promo:
+            # มีเฉพาะใน Compare
+            partial_compare = compare_promo.copy()
+            partial_compare["promoNumber"] = promo_num
+            partial_base = {"promoNumber": promo_num}  # ว่างเปล่า
+
         partial_base_result["promoInfo"].append(partial_base)
-
-        partial_compare = build_partial_json(compare_promo, path_list)
-        partial_compare["promoNumber"] = promo_num
         partial_compare_result["promoInfo"].append(partial_compare)
 
-    # ==== ฟิลด์อื่น ๆ ====
+    # ==== เปรียบเทียบฟิลด์อื่น ๆ ที่ไม่ใช่ promoInfo ====
     other_keys = set(base_filtered.keys()) | set(compare_filtered.keys())
     other_keys.discard("promoInfo")
 
@@ -411,7 +425,7 @@ def compare_json():
         partial_base_result.update(partial_base)
         partial_compare_result.update(partial_compare)
 
-    # ==== แสดงผลลัพธ์ใน GUI ====
+    # ==== สร้างผลลัพธ์และแสดงผล ====
     base_result = format_full_output(partial_base_result)
     compare_result = format_full_output(partial_compare_result)
 
@@ -425,10 +439,8 @@ def compare_json():
     highlight_differences(text_partial_base, total_diff_paths)
     highlight_differences(text_partial_compare, total_diff_paths)
 
-    global last_export_data
-    last_export_data = (partial_base_result, partial_compare_result)
-
     label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {len(total_diff_paths)} จุด")
+ 
 
 # ----------------- GUI -----------------
 root = tk.Tk()
