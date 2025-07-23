@@ -364,36 +364,37 @@ def export_to_excel():
         ws.column_dimensions["C"].width = 60
 
 
-    # --- สร้างชีตตาม promoNumber -------------------------------------------
+   # --- สร้างชีตเดียวรวมทุก promoNumber --------------------------------------
+    if "AllPromos" in wb.sheetnames:
+        del wb["AllPromos"]
+    ws = wb.create_sheet("AllPromos")
+
     base_promos = {p["promoNumber"]: p
-                   for p in base_part.get("promoInfo", [])
-                   if "promoNumber" in p}
+                for p in base_part.get("promoInfo", [])
+                if "promoNumber" in p}
     comp_promos = {p["promoNumber"]: p
-                   for p in comp_part.get("promoInfo", [])
-                   if "promoNumber" in p}
+                for p in comp_part.get("promoInfo", [])
+                if "promoNumber" in p}
 
     all_promo_nums = sorted(set(base_promos) | set(comp_promos),
                             key=lambda x: int(x) if str(x).isdigit() else str(x))
 
     for promo_num in all_promo_nums:
-        sheet = str(promo_num)[:31]  # ชื่อชีตต้อง ≤ 31 ตัวอักษร
-        if sheet in wb.sheetnames:
-            del wb[sheet]
-        ws = wb.create_sheet(sheet)
-
+        ws.append([f"========== promoNumber: {promo_num} ==========", "", ""])
         write_sheet(ws,
                     base_promos.get(promo_num, {}),
                     comp_promos.get(promo_num, {}))
 
-    # --- ชีต Others ---------------------------------------------------------
+    # --- เพิ่มข้อมูล Others ต่อท้ายในชีตเดียวกัน -----------------------------
     others_base = {k: v for k, v in base_part.items() if k != "promoInfo"}
     others_comp = {k: v for k, v in comp_part.items() if k != "promoInfo"}
 
     if others_base or others_comp:
-        if "Others" in wb.sheetnames:
-            del wb["Others"]
-        ws_others = wb.create_sheet("Others")
-        write_sheet(ws_others, others_base, others_comp)
+        ws.append([])
+        ws.append(["========== Others ==========", "", ""])
+        write_sheet(ws, others_base, others_comp)
+
+
 
     # --- บันทึก -------------------------------------------------------------
     try:
