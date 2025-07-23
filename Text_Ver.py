@@ -4,7 +4,7 @@ from tkinter import ttk, messagebox
 import re
 from deepdiff import DeepDiff
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import PatternFill
+from openpyxl.styles import PatternFill, Alignment
 import os
 
 # ----------------- JSON Utility -----------------
@@ -32,38 +32,54 @@ def build_partial_json(base, diff_paths):
         keys = [k[0] if k[0] else int(k[1]) for k in keys]
         current_src = base
         current_partial = partial
-        parents = []
+        parents = [] # To keep track of parent objects/lists for updating references
         for i, key in enumerate(keys):
             is_last = (i == len(keys) - 1)
-            if isinstance(current_src, dict) and key not in current_src:
-                break
-            if isinstance(current_src, list) and (not isinstance(key, int) or key >= len(current_src)):
-                break
-            if isinstance(key, int):
+            
+            # Navigate current_src
+            if isinstance(current_src, dict):
+                if key not in current_src:
+                    break # Path not found in source
+            elif isinstance(current_src, list):
+                if not isinstance(key, int) or key >= len(current_src):
+                    break # Path not found in source or invalid index
+            else:
+                break # Not a dict or list, cannot navigate further
+
+            if isinstance(key, int): # Handling list items
                 if not isinstance(current_partial, list):
                     if isinstance(current_partial, dict) and not current_partial:
                         new_list = []
-                        if parents:
+                        if parents: # Update parent reference
                             parent, parent_key = parents[-1]
-                            parent[parent_key] = new_list
-                        else:
+                            if isinstance(parent, dict):
+                                parent[parent_key] = new_list
+                            elif isinstance(parent, list):
+                                parent[parent_key] = new_list
+                        else: # This is the root level
                             partial = new_list
                         current_partial = new_list
-                    else:
+                    else: # current_partial is not a list and not an empty dict, so cannot proceed
                         break
+                
+                # Ensure list is long enough for the index
                 while len(current_partial) <= key:
-                    current_partial.append({})
+                    current_partial.append({}) # Fill with empty dicts or appropriate default
+                
                 if is_last:
                     current_partial[key] = current_src[key]
                 else:
                     parents.append((current_partial, key))
                     current_partial = current_partial[key]
                     current_src = current_src[key]
-            else: # key is a string
+
+            else: # Handling dictionary keys (string key)
                 if not isinstance(current_partial, dict):
-                    break
+                    break # Not a dict, cannot add string key
+                
                 if key not in current_partial:
-                    current_partial[key] = {}
+                    current_partial[key] = {} # Create empty dict for nested structure
+                
                 if is_last:
                     current_partial[key] = current_src[key]
                 else:
@@ -76,8 +92,9 @@ def format_full_output(data):
     if not isinstance(data, dict):
         return json.dumps(data, indent=2, ensure_ascii=False)
     output_lines = []
+    
+    # Process promoInfo first if it exists
     if "promoInfo" in data and isinstance(data["promoInfo"], list):
-        # Sort promos robustly, handling non-digit promoNumbers
         sorted_promos = sorted(
             data["promoInfo"],
             key=lambda p: int(p.get("promoNumber", "0")) if str(p.get("promoNumber", "0")).isdigit() else float('inf')
@@ -87,12 +104,14 @@ def format_full_output(data):
             output_lines.append(f"========== promoNumber: {promo_number} ==========")
             output_lines.append(json.dumps(promo, indent=2, ensure_ascii=False))
             output_lines.append("")
-    for key, value in data.items():
-        if key == "promoInfo":
-            continue
-        # Use json.dumps for the key's value for consistent formatting
+    
+    other_keys = [k for k in data.keys() if k != "promoInfo"]
+
+    for key in other_keys:
+        value = data[key]
         output_lines.append(f'"{key}": {json.dumps(value, indent=2, ensure_ascii=False)}')
         output_lines.append("")
+    
     return "\n".join(output_lines).strip()
 
 # ----------------- GUI Utility -----------------
@@ -141,25 +160,35 @@ def highlight_promo_lines(text_widget):
         start = f"{pos} lineend"
 
 def highlight_differences(text_widget, diff_paths):
-    # This function uses a heuristic to highlight lines containing a changed key.
-    # It may highlight extra lines if the key name is not unique within the object.
     text_widget.tag_remove("diff_highlight", "1.0", tk.END)
     text_widget.tag_configure("diff_highlight", foreground="#F700FF", font=("Segoe UI", 10, "bold"))
     for path in diff_paths:
-        keys = re.findall(r"\['([^]]+)'\]|\[(\d+)\]", path)
-        if not keys:
+        
+        # Example: path = "['promoInfo'][0]['name']" -> last_key = "name"
+        keys_in_path = re.findall(r"\['([^]]+)'\]|\[(\d+)\]", path)
+        if not keys_in_path:
             continue
-        last_key = keys[-1][0] or keys[-1][1]
-        start = "1.0"
+        
+        # Extract the relevant key or index to search for
+        last_key_or_index = keys_in_path[-1][0] or keys_in_path[-1][1]
+        
+        # Simple search for the last key/value on a line
+        search_pattern = re.escape(f'"{last_key_or_index}"') if not str(last_key_or_index).isdigit() else re.escape(str(last_key_or_index))
+        
+        start_pos = "1.0"
         while True:
-            pos = text_widget.search(f'"{last_key}"', start, stopindex=tk.END)
+            # Search for the key on its own line or within a line
+            pos = text_widget.search(search_pattern, start_pos, stopindex=tk.END, regexp=True)
             if not pos:
                 break
+            
             # Highlight the entire line where the key is found
             line_start = f"{pos.split('.')[0]}.0"
             line_end = f"{pos.split('.')[0]}.end"
             text_widget.tag_add("diff_highlight", line_start, line_end)
-            start = line_end
+            
+            # Continue searching from the end of the current highlighted line
+            start_pos = f"{pos} lineend"
 
 # ----------------- Global Variables -----------------
 EXPORT_FOLDER = os.path.join(os.getcwd(), "export")
@@ -173,20 +202,148 @@ if not os.path.exists(EXPORT_FOLDER):
         messagebox.showerror("Folder Creation Failed", f"Could not create the export folder:\n{e}")
         raise
 
-last_export_data = None # Store the latest comparison result
+# last_export_data will store (partial_base_result, partial_compare_result, total_diff_paths)
+last_export_data = None 
 
 # ----------------- Excel Export Utility -----------------
+
+def write_aligned_json_to_excel(ws, row_start, base_obj, compare_obj, indent=0):
+    fill_diff = PatternFill(start_color="FF9900", end_color="FF9900", fill_type="solid")
+    align_top_wrap = Alignment(vertical="top", wrap_text=True)
+
+    current_row = row_start
+    indent_str = "  " * indent
+
+    # ช่วยแปลงค่า primitive เป็น json string แบบ indent 0
+    def json_primitive_str(val):
+        return json.dumps(val, ensure_ascii=False)
+
+    # กรณี dict
+    if isinstance(base_obj, dict) or isinstance(compare_obj, dict):
+        ws.cell(current_row, 1, value=indent_str + "{").alignment = align_top_wrap
+        ws.cell(current_row, 2, value=indent_str + "{").alignment = align_top_wrap
+        current_row += 1
+
+        # รวม key ของทั้งสองฝั่ง (ไม่ซ้ำ)
+        keys = set()
+        if isinstance(base_obj, dict):
+            keys.update(base_obj.keys())
+        if isinstance(compare_obj, dict):
+            keys.update(compare_obj.keys())
+        keys = sorted(keys)
+
+        for key in keys:
+            base_val = base_obj.get(key) if isinstance(base_obj, dict) else None
+            comp_val = compare_obj.get(key) if isinstance(compare_obj, dict) else None
+
+            base_has = base_val is not None
+            comp_has = comp_val is not None
+
+            # ถ้าเป็น nested (dict or list) recurse ต่อ
+            if (isinstance(base_val, (dict, list)) or isinstance(comp_val, (dict, list))):
+                # เขียน key line
+                base_key_line = indent_str + f'  "{key}": ' if base_has else ""
+                comp_key_line = indent_str + f'  "{key}": ' if comp_has else ""
+
+                ws.cell(current_row, 1, value=base_key_line).alignment = align_top_wrap
+                ws.cell(current_row, 2, value=comp_key_line).alignment = align_top_wrap
+
+                # ไฮไลต์ถ้า key มีฝั่งเดียว หรือค่าต่างกัน (ในกรณีนี้ถือว่าต่าง เพราะฝั่งนึงว่าง)
+                if base_has != comp_has:
+                    ws.cell(current_row, 1).fill = fill_diff
+                    ws.cell(current_row, 2).fill = fill_diff
+
+                current_row += 1
+
+                # recurse ค่าต่อ
+                current_row = write_aligned_json_to_excel(ws, current_row, base_val or {}, comp_val or {}, indent + 2)
+
+            else:
+                # primitive value
+                base_line = indent_str + f'  "{key}": {json_primitive_str(base_val)}' if base_has else ""
+                comp_line = indent_str + f'  "{key}": {json_primitive_str(comp_val)}' if comp_has else ""
+
+                cell_base = ws.cell(current_row, 1, value=base_line)
+                cell_comp = ws.cell(current_row, 2, value=comp_line)
+                cell_base.alignment = align_top_wrap
+                cell_comp.alignment = align_top_wrap
+
+                # ไฮไลต์ถ้าค่าต่าง
+                if base_line != comp_line:
+                    cell_base.fill = fill_diff
+                    cell_comp.fill = fill_diff
+
+                current_row += 1
+
+        ws.cell(current_row, 1, value=indent_str + "}").alignment = align_top_wrap
+        ws.cell(current_row, 2, value=indent_str + "}").alignment = align_top_wrap
+        current_row += 1
+
+    # กรณี list
+    elif isinstance(base_obj, list) or isinstance(compare_obj, list):
+        ws.cell(current_row, 1, value=indent_str + "[").alignment = align_top_wrap
+        ws.cell(current_row, 2, value=indent_str + "[").alignment = align_top_wrap
+        current_row += 1
+
+        max_len = max(len(base_obj) if isinstance(base_obj, list) else 0,
+                      len(compare_obj) if isinstance(compare_obj, list) else 0)
+
+        for i in range(max_len):
+            base_item = base_obj[i] if (isinstance(base_obj, list) and i < len(base_obj)) else None
+            comp_item = compare_obj[i] if (isinstance(compare_obj, list) and i < len(compare_obj)) else None
+
+            # ถ้า nested dict/list recurse
+            if (isinstance(base_item, (dict, list)) or isinstance(comp_item, (dict, list))):
+                current_row = write_aligned_json_to_excel(ws, current_row, base_item or {}, comp_item or {}, indent + 1)
+            else:
+                base_line = indent_str + "  " + (json_primitive_str(base_item) if base_item is not None else "")
+                comp_line = indent_str + "  " + (json_primitive_str(comp_item) if comp_item is not None else "")
+
+                cell_base = ws.cell(current_row, 1, value=base_line)
+                cell_comp = ws.cell(current_row, 2, value=comp_line)
+                cell_base.alignment = align_top_wrap
+                cell_comp.alignment = align_top_wrap
+
+                if base_line != comp_line:
+                    cell_base.fill = fill_diff
+                    cell_comp.fill = fill_diff
+
+                current_row += 1
+
+        ws.cell(current_row, 1, value=indent_str + "]").alignment = align_top_wrap
+        ws.cell(current_row, 2, value=indent_str + "]").alignment = align_top_wrap
+        current_row += 1
+
+    else:
+        # กรณี primitive ตัวเดียว (เช่น None) ให้เขียนค่าทั้งสองฝั่ง
+        base_line = indent_str + json_primitive_str(base_obj)
+        comp_line = indent_str + json_primitive_str(compare_obj)
+
+        cell_base = ws.cell(current_row, 1, value=base_line)
+        cell_comp = ws.cell(current_row, 2, value=comp_line)
+        cell_base.alignment = align_top_wrap
+        cell_comp.alignment = align_top_wrap
+
+        if base_line != comp_line:
+            cell_base.fill = fill_diff
+            cell_comp.fill = fill_diff
+
+        current_row += 1
+
+    return current_row
+
+
+
+
 def export_to_excel():
     if not last_export_data:
         messagebox.showwarning("No Comparison Data", "Please compare JSON files before exporting.")
         return
 
-    base_part, comp_part = last_export_data
-    diff_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+    partial_base_result, partial_compare_result = last_export_data
 
-    # Get single-line JSON strings from the input boxes for logging
-    base_json_str = text_base.get("1.0", "end").strip().replace("\n", " ")
-    compare_json_str = text_compare.get("1.0", "end").strip().replace("\n", " ")
+    diff_fill = PatternFill(start_color="FF9900", end_color="FF9900", fill_type="solid")
+    align_top_wrap = Alignment(vertical="top", wrap_text=True)
 
     try:
         if os.path.exists(EXCEL_PATH):
@@ -198,95 +355,33 @@ def export_to_excel():
         messagebox.showerror("Excel Load Error", str(e))
         return
 
-    # Delete old sheet and create a new one
     if "Comparison" in wb.sheetnames:
         del wb["Comparison"]
     ws = wb.create_sheet("Comparison")
 
-    # --- Write input data to the first few rows ---
+    # แสดง JSON input เต็ม filtered base & compare
     ws.cell(row=1, column=1, value="Input: JSON Base (Onlinepro.json)")
     ws.cell(row=1, column=2, value="Input: JSON Compare (NewPro.json)")
-    ws.cell(row=2, column=1, value=base_json_str)
-    ws.cell(row=2, column=2, value=compare_json_str)
 
-    # --- Write comparison result headers ---
+    base_raw_filtered = filter_out_debug(json.loads(text_base.get("1.0", tk.END)))
+    compare_raw_filtered = filter_out_debug(json.loads(text_compare.get("1.0", tk.END)))
+
+    ws.cell(row=2, column=1, value=json.dumps(base_raw_filtered, indent=2, ensure_ascii=False))
+    ws.cell(row=2, column=2, value=json.dumps(compare_raw_filtered, indent=2, ensure_ascii=False))
+
+    ws.column_dimensions["A"].width = 80
+    ws.column_dimensions["B"].width = 80
+    ws.row_dimensions[2].height = max(
+        ws.cell(row=2, column=1).value.count("\n"),
+        ws.cell(row=2, column=2).value.count("\n")
+    ) * 15
+
+    # หัวข้อ Differences
     ws.cell(row=4, column=1, value="Result: JSON Base (Differences)")
     ws.cell(row=4, column=2, value="Result: JSON Compare (Differences)")
 
-    current_row = 5
-
-    def json_to_lines(data):
-        if data is None: return []
-        if isinstance(data, (dict, list)):
-            return json.dumps(data, indent=2, ensure_ascii=False).splitlines()
-        return [json.dumps(data, ensure_ascii=False)]
-
-    base_promos = {p["promoNumber"]: p for p in base_part.get("promoInfo", []) if "promoNumber" in p}
-    comp_promos = {p["promoNumber"]: p for p in comp_part.get("promoInfo", []) if "promoNumber" in p}
-    all_promo_nums = sorted(
-        set(base_promos) | set(comp_promos),
-        key=lambda x: int(x) if str(x).isdigit() else float('inf')
-    )
-
-    for promo_num in all_promo_nums:
-        ws.cell(row=current_row, column=1, value=f"========== promoNumber: {promo_num} ==========")
-        current_row += 1
-
-        base_obj = base_promos.get(promo_num, {})
-        comp_obj = comp_promos.get(promo_num, {})
-
-        base_lines = json_to_lines(base_obj)
-        comp_lines = json_to_lines(comp_obj)
-        max_lines = max(len(base_lines), len(comp_lines))
-
-        for i in range(max_lines):
-            b_line = base_lines[i] if i < len(base_lines) else ""
-            c_line = comp_lines[i] if i < len(comp_lines) else ""
-            
-            cell_b = ws.cell(row=current_row, column=1, value=b_line)
-            cell_c = ws.cell(row=current_row, column=2, value=c_line)
-
-            if b_line != c_line:
-                if b_line: cell_b.fill = diff_fill
-                if c_line: cell_c.fill = diff_fill
-            current_row += 1
-        current_row += 1
-
-    # Handle other fields outside of promoInfo
-    others_base = {k: v for k, v in base_part.items() if k != "promoInfo"}
-    others_comp = {k: v for k, v in comp_part.items() if k != "promoInfo"}
-
-    if others_base or others_comp:
-        ws.cell(row=current_row, column=1, value="========== Others ==========")
-        current_row += 1
-
-        all_keys = sorted(set(others_base.keys()) | set(others_comp.keys()))
-        for key in all_keys:
-            ws.cell(row=current_row, column=1, value=f'"{key}":')
-            current_row += 1
-
-            base_val = others_base.get(key)
-            comp_val = others_comp.get(key)
-            
-            base_lines = json_to_lines(base_val)
-            comp_lines = json_to_lines(comp_val)
-            max_lines = max(len(base_lines), len(comp_lines))
-
-            for i in range(max_lines):
-                b_line = base_lines[i] if i < len(base_lines) else ""
-                c_line = comp_lines[i] if i < len(comp_lines) else ""
-
-                cell_b = ws.cell(row=current_row, column=1, value=b_line)
-                cell_c = ws.cell(row=current_row, column=2, value=c_line)
-
-                if b_line != c_line:
-                    if b_line: cell_b.fill = diff_fill
-                    if c_line: cell_c.fill = diff_fill
-                current_row += 1
-            current_row += 1
-
-    ws.column_dimensions["A"].width = 70
-    ws.column_dimensions["B"].width = 70
+    # เรียกฟังก์ชันเขียน aligned JSON
+    write_aligned_json_to_excel(ws, 5, partial_base_result, partial_compare_result, indent=0)
 
     try:
         wb.save(EXCEL_PATH)
@@ -295,17 +390,15 @@ def export_to_excel():
         messagebox.showerror("Save Failed", "Permission denied. Please close the Excel file and try again.")
     except Exception as e:
         messagebox.showerror("Save Failed", f"An unexpected error occurred:\n{e}")
+
         
-# ----------------- Core Function: compare_json -----------------
+# ----------------- Core Function: compare_json ----------------- #===================อย่าแก้ไขส่วนนี้ลงไป===================
 def compare_json():
     try:
         base_data = json.loads(text_base.get("1.0", tk.END))
         compare_data = json.loads(text_compare.get("1.0", tk.END))
     except json.JSONDecodeError as e:
-        messagebox.showerror("Invalid JSON Format", str(e))
-        return
-    except Exception as e:
-        messagebox.showerror("Error", f"An unexpected error occurred while reading input: {e}")
+        messagebox.showerror("รูปแบบ JSON ไม่ถูกต้อง", str(e))
         return
 
     remove_description(base_data)
@@ -314,7 +407,6 @@ def compare_json():
     base_filtered = filter_out_debug(base_data)
     compare_filtered = filter_out_debug(compare_data)
 
-    # --- Compare PromoInfo Section ---
     base_promos = {p["promoNumber"]: p for p in base_filtered.get("promoInfo", []) if "promoNumber" in p}
     compare_promos = {p["promoNumber"]: p for p in compare_filtered.get("promoInfo", []) if "promoNumber" in p}
 
@@ -322,84 +414,83 @@ def compare_json():
     partial_compare_result = {"promoInfo": []}
     total_diff_paths = []
 
-    # Robustly sort promo numbers, handling non-integer values
-    all_promo_numbers = sorted(
-        set(base_promos.keys()) | set(compare_promos.keys()),
-        key=lambda x: int(x) if str(x).isdigit() else float('inf')
-    )
+    # ==== เปรียบเทียบ promoInfo ตาม promoNumber ====
+    common_promo_numbers = sorted(set(base_promos.keys()) & set(compare_promos.keys()), key=lambda x: int(x))
 
-    for promo_num in all_promo_numbers:
-        base_promo = base_promos.get(promo_num)
-        compare_promo = compare_promos.get(promo_num)
-        
+    for promo_num in common_promo_numbers:
+        base_promo = base_promos[promo_num]
+        compare_promo = compare_promos[promo_num]
+
         diff = DeepDiff(base_promo, compare_promo, ignore_order=False, report_repetition=True, view="tree")
-        
+
+        if not diff:
+            continue
+
         path_list = []
-        if diff:
-            for section in diff:
-                for change in diff[section]:
-                    if hasattr(change, 'path'):
-                        path = change.path(output_format='list')
-                        s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
-                        path_list.append(s)
-            
-            total_diff_paths.extend([f"['promoInfo'][{len(partial_base_result['promoInfo'])}]{p}" for p in path_list])
-
-        partial_base = build_partial_json(base_promo, path_list) if base_promo else {}
-        partial_base["promoNumber"] = promo_num
-        
-        partial_compare = build_partial_json(compare_promo, path_list) if compare_promo else {}
-        partial_compare["promoNumber"] = promo_num
-
-        # Only add to results if there was a difference or if the promo is unique to one side
-        if diff:
-            partial_base_result["promoInfo"].append(partial_base)
-            partial_compare_result["promoInfo"].append(partial_compare)
-
-    # --- Compare Other Keys Section (All at once for correctness) ---
-    others_base = {k: v for k, v in base_filtered.items() if k != 'promoInfo'}
-    others_compare = {k: v for k, v in compare_filtered.items() if k != 'promoInfo'}
-    
-    other_diff = DeepDiff(others_base, others_compare, ignore_order=False, report_repetition=True, view="tree")
-    
-    if other_diff:
-        path_list = []
-        for section in other_diff:
-            for change in other_diff[section]:
+        for section in diff:
+            for change in diff[section]:
                 if hasattr(change, 'path'):
                     path = change.path(output_format='list')
                     s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
-                    # Reconstruct path from root key
-                    if path:
-                        path_list.append(f"['{path[0]}']" + s[s.find(']'):])
-        
+                    path_list.append(s)
+
+        total_diff_paths.extend([f"['promoInfo'][{len(partial_base_result['promoInfo'])}]{p}" for p in path_list])
+
+        partial_base = build_partial_json(base_promo, path_list)
+        partial_base["promoNumber"] = promo_num
+        partial_base_result["promoInfo"].append(partial_base)
+
+        partial_compare = build_partial_json(compare_promo, path_list)
+        partial_compare["promoNumber"] = promo_num
+        partial_compare_result["promoInfo"].append(partial_compare)
+
+    # ==== เปรียบเทียบฟิลด์อื่น ๆ ที่ไม่ใช่ promoInfo ====
+    other_keys = set(base_filtered.keys()) | set(compare_filtered.keys())
+    other_keys.discard("promoInfo")
+
+    for key in sorted(other_keys):
+        if key not in base_filtered or key not in compare_filtered:
+            continue  # skip if key missing in one side
+
+        diff = DeepDiff(base_filtered[key], compare_filtered[key], ignore_order=False, report_repetition=True, view="tree")
+
+        if not diff:
+            continue
+
+        path_list = []
+        for section in diff:
+            for change in diff[section]:
+                if hasattr(change, 'path'):
+                    path = change.path(output_format='list')
+                    s = f"['{key}']" + "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
+                    path_list.append(s)
+
         total_diff_paths.extend(path_list)
 
-        # Build partial JSONs for the 'other' keys and update the main result
-        partial_base_others = build_partial_json(base_filtered, path_list)
-        partial_compare_others = build_partial_json(compare_filtered, path_list)
-        
-        partial_base_result.update(partial_base_others)
-        partial_compare_result.update(partial_compare_others)
+        partial_base = build_partial_json(base_filtered, path_list)
+        partial_compare = build_partial_json(compare_filtered, path_list)
 
-    # --- Display Results ---
-    base_result_str = format_full_output(partial_base_result)
-    compare_result_str = format_full_output(partial_compare_result)
+        partial_base_result.update(partial_base)
+        partial_compare_result.update(partial_compare)
+
+    # ==== สร้างผลลัพธ์และแสดงผล ====
+    base_result = format_full_output(partial_base_result)
+    compare_result = format_full_output(partial_compare_result)
 
     text_partial_base.delete("1.0", tk.END)
-    text_partial_compare.delete("1.0", tk.END) # <<< THIS LINE IS NOW FIXED
-    text_partial_base.insert(tk.END, base_result_str)
-    text_partial_compare.insert(tk.END, compare_result_str)
+    text_partial_compare.delete("1.0", tk.END)
+    text_partial_base.insert(tk.END, base_result)
+    text_partial_compare.insert(tk.END, compare_result)
 
     highlight_promo_lines(text_partial_base)
     highlight_promo_lines(text_partial_compare)
     highlight_differences(text_partial_base, total_diff_paths)
     highlight_differences(text_partial_compare, total_diff_paths)
-
+    
     global last_export_data
     last_export_data = (partial_base_result, partial_compare_result)
 
-    label_result.config(text=f"🔍 Found {len(total_diff_paths)} differences.", foreground="#f8f8f2")
+    label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {len(total_diff_paths)} จุด")
 
 # ----------------- GUI Setup -----------------
 root = tk.Tk()
