@@ -230,8 +230,8 @@ def export_to_excel():
     # --- ฟังก์ชันเขียนข้อมูลลงหนึ่งชีต --------------------------------------
     def write_sheet(ws, base_data: dict, comp_data: dict):
         """
-        - compare_online (comp_data) อยู่ Column A (ซ้าย)
-        - compare_newpro (base_data) อยู่ Column C (ขวา)
+        - compare_newpro (base_data) อยู่ Column A (ซ้าย)
+        - compare_online (comp_data) อยู่ Column C (ขวา)
         - แสดง JSON เป็น block (key + value ในบรรทัดเดียว)
         - ไม่แสดง null
         - ถ้ามีเฉพาะฝั่งใดฝั่งหนึ่ง → อีกฝั่งเว้นว่าง
@@ -256,7 +256,7 @@ def export_to_excel():
             comp_promos = comp_data.get("promoInfo", [])
 
             max_len = max(len(base_promos), len(comp_promos))
-            ws.append(["compare_online (promoInfo)", "", "compare_newpro (promoInfo)"])
+            ws.append(["compare_newpro (promoInfo)", "", "compare_online (promoInfo)"])
 
             for i in range(max_len):
                 base_obj = base_promos[i] if i < len(base_promos) else None
@@ -271,20 +271,20 @@ def export_to_excel():
                     c_line = comp_lines[j] if j < len(comp_lines) else ""
 
                     row_data = ["", "", ""]
-                    if c_line and not b_line:
-                        row_data[0] = c_line
-                    elif b_line and not c_line:
-                        row_data[2] = b_line
+                    if b_line and not c_line:
+                        row_data[0] = b_line
+                    elif c_line and not b_line:
+                        row_data[2] = c_line
                     elif b_line and c_line:
-                        row_data[0] = c_line
-                        row_data[2] = b_line
+                        row_data[0] = b_line
+                        row_data[2] = c_line
 
                     ws.append(row_data)
                     row = ws.max_row
                     if b_line != c_line:
-                        if c_line:
-                            ws.cell(row=row, column=1).fill = diff_fill
                         if b_line:
+                            ws.cell(row=row, column=1).fill = diff_fill
+                        if c_line:
                             ws.cell(row=row, column=3).fill = diff_fill
 
         # ---------- top-level keys ----------
@@ -306,21 +306,21 @@ def export_to_excel():
                 c_line = f'"{key}": {comp_lines[0]}' if comp_lines else ""
 
                 row_data = ["", "", ""]
-                if c_line and not b_line:
-                    row_data[0] = c_line
-                elif b_line and not c_line:
-                    row_data[2] = b_line
+                if b_line and not c_line:
+                    row_data[0] = b_line
+                elif c_line and not b_line:
+                    row_data[2] = c_line
                 elif b_line and c_line:
-                    row_data[0] = c_line
-                    row_data[2] = b_line
+                    row_data[0] = b_line
+                    row_data[2] = c_line
 
                 ws.append(row_data)
                 row = ws.max_row
                 if b_line != c_line:
-                    if c_line:
-                        ws.cell(row=row, column=1).fill = diff_fill
                     if b_line:
                         ws.cell(row=row, column=3).fill = diff_fill
+                    if c_line:
+                        ws.cell(row=row, column=1).fill = diff_fill
 
             else:
                 ws.append([f'"{key}":', "", f'"{key}":'])
@@ -329,26 +329,25 @@ def export_to_excel():
                     c_line = comp_lines[j] if j < len(comp_lines) else ""
 
                     row_data = ["", "", ""]
-                    if c_line and not b_line:
-                        row_data[0] = c_line
-                    elif b_line and not c_line:
-                        row_data[2] = b_line
+                    if b_line and not c_line:
+                        row_data[0] = b_line
+                    elif c_line and not b_line:
+                        row_data[2] = c_line
                     elif b_line and c_line:
-                        row_data[0] = c_line
-                        row_data[2] = b_line
+                        row_data[0] = b_line
+                        row_data[2] = c_line
 
                     ws.append(row_data)
                     row = ws.max_row
                     if b_line != c_line:
-                        if c_line:
-                            ws.cell(row=row, column=1).fill = diff_fill
                         if b_line:
+                            ws.cell(row=row, column=1).fill = diff_fill
+                        if c_line:
                             ws.cell(row=row, column=3).fill = diff_fill
 
         ws.column_dimensions["A"].width = 60
         ws.column_dimensions["B"].width = 5
         ws.column_dimensions["C"].width = 60
-
 
 
     # --- สร้างชีตตาม promoNumber -------------------------------------------
