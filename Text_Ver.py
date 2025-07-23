@@ -230,14 +230,25 @@ def export_to_excel():
     # --- ฟังก์ชันเขียนข้อมูลลงหนึ่งชีต --------------------------------------
     def write_sheet(ws, base_data: dict, comp_data: dict):
         """
-        • แสดง JSON เป็น block แยกบรรทัด (line-by-line)
-        • จัดฝั่งซ้ายขวาให้เปรียบเทียบได้ง่าย
-        • ไฮไลต์เฉพาะบรรทัดที่แตกต่าง
+        - compare_online (comp_data) อยู่ Column A (ซ้าย)
+        - compare_newpro (base_data) อยู่ Column C (ขวา)
+        - แสดง JSON เป็น block (key + value ในบรรทัดเดียว)
+        - ไม่แสดง null
+        - ถ้ามีเฉพาะฝั่งใดฝั่งหนึ่ง → อีกฝั่งเว้นว่าง
+        - ไฮไลต์เฉพาะบรรทัดที่แตกต่าง
         """
-        def json_lines(data):
-            if not data:
+
+        def json_block(data):
+            """แปลง dict หรือ list เป็น JSON block และไม่แสดง null"""
+            if data is None:
                 return []
-            return json.dumps(data, indent=2, ensure_ascii=False).splitlines()
+            elif isinstance(data, (str, int, float, bool)):
+                return [json.dumps(data, ensure_ascii=False)]
+            elif isinstance(data, (dict, list)):
+                lines = json.dumps(data, indent=2, ensure_ascii=False).splitlines()
+                return [line for line in lines if line.strip() != "null"]
+            else:
+                return [str(data)]
 
         # ---------- promoInfo ----------
         if "promoInfo" in base_data or "promoInfo" in comp_data:
@@ -245,57 +256,99 @@ def export_to_excel():
             comp_promos = comp_data.get("promoInfo", [])
 
             max_len = max(len(base_promos), len(comp_promos))
-            ws.append(["compare_newpro (promoInfo)", "", "compare_online (promoInfo)"])
+            ws.append(["compare_online (promoInfo)", "", "compare_newpro (promoInfo)"])
 
             for i in range(max_len):
-                base_obj = base_promos[i] if i < len(base_promos) else {}
-                comp_obj = comp_promos[i] if i < len(comp_promos) else {}
+                base_obj = base_promos[i] if i < len(base_promos) else None
+                comp_obj = comp_promos[i] if i < len(comp_promos) else None
 
-                base_lines = json_lines(base_obj)
-                comp_lines = json_lines(comp_obj)
+                base_lines = json_block(base_obj)
+                comp_lines = json_block(comp_obj)
                 max_lines = max(len(base_lines), len(comp_lines))
 
                 for j in range(max_lines):
                     b_line = base_lines[j] if j < len(base_lines) else ""
                     c_line = comp_lines[j] if j < len(comp_lines) else ""
-                    ws.append([b_line, "", c_line])
 
+                    row_data = ["", "", ""]
+                    if c_line and not b_line:
+                        row_data[0] = c_line
+                    elif b_line and not c_line:
+                        row_data[2] = b_line
+                    elif b_line and c_line:
+                        row_data[0] = c_line
+                        row_data[2] = b_line
+
+                    ws.append(row_data)
                     row = ws.max_row
                     if b_line != c_line:
-                        if b_line:
-                            ws.cell(row=row, column=1).fill = diff_fill
                         if c_line:
+                            ws.cell(row=row, column=1).fill = diff_fill
+                        if b_line:
                             ws.cell(row=row, column=3).fill = diff_fill
 
         # ---------- top-level keys ----------
         other_keys = sorted(set(base_data.keys()) | set(comp_data.keys()) - {"promoInfo"})
         if other_keys:
             ws.append([])
-            ws.append(["compare_newpro (others)", "", "compare_online (others)"])
+            ws.append(["compare_newpro", "", "compare_online"])
 
         for key in other_keys:
             base_val = base_data.get(key)
             comp_val = comp_data.get(key)
 
-            base_lines = json_lines(base_val)
-            comp_lines = json_lines(comp_val)
+            base_lines = json_block(base_val)
+            comp_lines = json_block(comp_val)
             max_lines = max(len(base_lines), len(comp_lines))
 
-            for j in range(max_lines):
-                b_line = base_lines[j] if j < len(base_lines) else ""
-                c_line = comp_lines[j] if j < len(comp_lines) else ""
-                ws.append([b_line, "", c_line])
+            if max_lines == 1:
+                b_line = f'"{key}": {base_lines[0]}' if base_lines else ""
+                c_line = f'"{key}": {comp_lines[0]}' if comp_lines else ""
 
+                row_data = ["", "", ""]
+                if c_line and not b_line:
+                    row_data[0] = c_line
+                elif b_line and not c_line:
+                    row_data[2] = b_line
+                elif b_line and c_line:
+                    row_data[0] = c_line
+                    row_data[2] = b_line
+
+                ws.append(row_data)
                 row = ws.max_row
                 if b_line != c_line:
-                    if b_line:
-                        ws.cell(row=row, column=1).fill = diff_fill
                     if c_line:
+                        ws.cell(row=row, column=1).fill = diff_fill
+                    if b_line:
                         ws.cell(row=row, column=3).fill = diff_fill
+
+            else:
+                ws.append([f'"{key}":', "", f'"{key}":'])
+                for j in range(max_lines):
+                    b_line = base_lines[j] if j < len(base_lines) else ""
+                    c_line = comp_lines[j] if j < len(comp_lines) else ""
+
+                    row_data = ["", "", ""]
+                    if c_line and not b_line:
+                        row_data[0] = c_line
+                    elif b_line and not c_line:
+                        row_data[2] = b_line
+                    elif b_line and c_line:
+                        row_data[0] = c_line
+                        row_data[2] = b_line
+
+                    ws.append(row_data)
+                    row = ws.max_row
+                    if b_line != c_line:
+                        if c_line:
+                            ws.cell(row=row, column=1).fill = diff_fill
+                        if b_line:
+                            ws.cell(row=row, column=3).fill = diff_fill
 
         ws.column_dimensions["A"].width = 60
         ws.column_dimensions["B"].width = 5
         ws.column_dimensions["C"].width = 60
+
 
 
     # --- สร้างชีตตาม promoNumber -------------------------------------------
@@ -372,7 +425,10 @@ def compare_json():
             diff = DeepDiff(base_promo, compare_promo, ignore_order=False, report_repetition=True, view="tree")
 
             if not diff:
-                continue  # ไม่มี diff ก็ไม่ต้องใส่
+                partial_base = base_promo.copy()
+                partial_base["promoNumber"] = promo_num
+                partial_compare = compare_promo.copy()
+                partial_compare["promoNumber"] = promo_num
 
             path_list = []
             for section in diff:
