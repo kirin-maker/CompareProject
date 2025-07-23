@@ -205,6 +205,8 @@ def export_to_excel():
       • ฝั่งที่ไม่มีข้อมูลในแถวนั้น เว้นว่าง
       • ไฮไลต์แถวที่ต่างกันเป็นสีเหลือง
       • คีย์อื่น ๆ นอก promoInfo เก็บไว้ในชีต “Others”
+      • ข้อมูลในคอลัมน์ A คือ compare_online (ฝั่งซ้าย)
+      • ข้อมูลในคอลัมน์ C คือ compare_newpro (ฝั่งขวา)
     """
     if not last_export_data:
         messagebox.showwarning("ยังไม่มีข้อมูลเปรียบเทียบ",
@@ -230,8 +232,8 @@ def export_to_excel():
     # --- ฟังก์ชันเขียนข้อมูลลงหนึ่งชีต --------------------------------------
     def write_sheet(ws, base_data: dict, comp_data: dict):
         """
-        - compare_newpro (base_data) อยู่ Column A (ซ้าย)
-        - compare_online (comp_data) อยู่ Column C (ขวา)
+        - compare_online (comp_data) อยู่ Column A (ซ้าย)
+        - compare_newpro (base_data) อยู่ Column C (ขวา)
         - แสดง JSON เป็น block (key + value ในบรรทัดเดียว)
         - ไม่แสดง null
         - ถ้ามีเฉพาะฝั่งใดฝั่งหนึ่ง → อีกฝั่งเว้นว่าง
@@ -256,15 +258,25 @@ def export_to_excel():
             comp_promos = comp_data.get("promoInfo", [])
 
             max_len = max(len(base_promos), len(comp_promos))
-            ws.append(["compare_newpro (promoInfo)", "", "compare_online (promoInfo)"])
+            ws.append(["compare_online (promoInfo)", "", "compare_newpro (promoInfo)"])
 
             for i in range(max_len):
                 base_obj = base_promos[i] if i < len(base_promos) else None
                 comp_obj = comp_promos[i] if i < len(comp_promos) else None
 
-                base_lines = json_block(base_obj)
-                comp_lines = json_block(comp_obj)
+                # สลับ base_lines กับ comp_lines เพื่อสลับฝั่งแสดงข้อมูล
+                comp_lines = json_block(base_obj)  # compare_online (ซ้าย)
+                base_lines = json_block(comp_obj)  # compare_newpro (ขวา)
                 max_lines = max(len(base_lines), len(comp_lines))
+
+                promo_number = None
+                if base_obj and isinstance(base_obj, dict) and "promoNumber" in base_obj:
+                    promo_number = base_obj["promoNumber"]
+                elif comp_obj and isinstance(comp_obj, dict) and "promoNumber" in comp_obj:
+                    promo_number = comp_obj["promoNumber"]
+
+                if promo_number is not None:
+                    ws.append([f"promoNumber: {promo_number}", "", f"promoNumber: {promo_number}"])
 
                 for j in range(max_lines):
                     b_line = base_lines[j] if j < len(base_lines) else ""
@@ -272,20 +284,22 @@ def export_to_excel():
 
                     row_data = ["", "", ""]
                     if b_line and not c_line:
-                        row_data[0] = b_line
+                        row_data[2] = b_line  # compare_newpro ขวา
                     elif c_line and not b_line:
-                        row_data[2] = c_line
+                        row_data[0] = c_line  # compare_online ซ้าย
                     elif b_line and c_line:
-                        row_data[0] = b_line
-                        row_data[2] = c_line
+                        row_data[2] = b_line
+                        row_data[0] = c_line
 
                     ws.append(row_data)
                     row = ws.max_row
                     if b_line != c_line:
                         if b_line:
-                            ws.cell(row=row, column=1).fill = diff_fill
-                        if c_line:
                             ws.cell(row=row, column=3).fill = diff_fill
+                        if c_line:
+                            ws.cell(row=row, column=1).fill = diff_fill
+
+                ws.append([])
 
         # ---------- top-level keys ----------
         other_keys = sorted(set(base_data.keys()) | set(comp_data.keys()) - {"promoInfo"})
@@ -307,12 +321,12 @@ def export_to_excel():
 
                 row_data = ["", "", ""]
                 if b_line and not c_line:
-                    row_data[0] = b_line
+                    row_data[2] = b_line
                 elif c_line and not b_line:
-                    row_data[2] = c_line
+                    row_data[0] = c_line
                 elif b_line and c_line:
-                    row_data[0] = b_line
-                    row_data[2] = c_line
+                    row_data[2] = b_line
+                    row_data[0] = c_line
 
                 ws.append(row_data)
                 row = ws.max_row
@@ -330,20 +344,20 @@ def export_to_excel():
 
                     row_data = ["", "", ""]
                     if b_line and not c_line:
-                        row_data[0] = b_line
+                        row_data[2] = b_line
                     elif c_line and not b_line:
-                        row_data[2] = c_line
+                        row_data[0] = c_line
                     elif b_line and c_line:
-                        row_data[0] = b_line
-                        row_data[2] = c_line
+                        row_data[2] = b_line
+                        row_data[0] = c_line
 
                     ws.append(row_data)
                     row = ws.max_row
                     if b_line != c_line:
                         if b_line:
-                            ws.cell(row=row, column=1).fill = diff_fill
-                        if c_line:
                             ws.cell(row=row, column=3).fill = diff_fill
+                        if c_line:
+                            ws.cell(row=row, column=1).fill = diff_fill
 
         ws.column_dimensions["A"].width = 60
         ws.column_dimensions["B"].width = 5
@@ -389,6 +403,7 @@ def export_to_excel():
     except PermissionError:
         messagebox.showerror("ไม่สามารถบันทึก",
                              "กรุณาปิดไฟล์ Excel ก่อนแล้วลองใหม่")
+
 
 # ----------------- Core Function: compare_json -----------------
 
