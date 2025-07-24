@@ -207,49 +207,66 @@ last_export_data = None
 
 # ----------------- Excel Export Utility -----------------
 
+def filter_out_debug(data):
+    if isinstance(data, dict):
+        data.pop("debug", None)
+        for k, v in data.items():
+            filter_out_debug(v)
+    elif isinstance(data, list):
+        for item in data:
+            filter_out_debug(item)
+    return data
+
 def to_pretty_json_blocks(promo_list):
-    import json
     blocks = []
     for promo in promo_list:
-        if isinstance(promo, dict):
-            blocks.append(promo)
-        else:
+        if not isinstance(promo, dict):
             try:
-                blocks.append(json.loads(str(promo)))
+                promo = json.loads(str(promo))
             except Exception:
                 continue
+
+        # ดึงและแปลง promoNumber
+        promo_number_raw = promo.get("promoNumber", "UNKNOWN")
+        try:
+            promo_number = int(promo_number_raw)
+        except Exception:
+            promo_number = promo_number_raw  # fallback เช่น "UNKNOWN"
+
+        header = f"{promo_number}"  # ใช้เลขอย่างเดียว
+        pretty_json = json.dumps(promo, indent=2, ensure_ascii=False)
+        blocks.append(f"{header}\n{pretty_json}")
     return blocks
 
-def write_aligned_json_to_excel():
-    
 
+def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_fill, align_top_wrap):
+    row = start_row
+    max_len = max(len(base_lines), len(compare_lines))
+
+    for i in range(max_len):
+        b_line = base_lines[i] if i < len(base_lines) else "-"
+        c_line = compare_lines[i] if i < len(compare_lines) else "-"
+
+        cell_b = ws.cell(row=row, column=2, value=b_line)
+        cell_c = ws.cell(row=row, column=3, value=c_line)
+
+        cell_b.alignment = align_top_wrap
+        cell_c.alignment = align_top_wrap
+
+        if b_line.strip() != c_line.strip():
+            cell_b.fill = diff_fill
+            cell_c.fill = diff_fill
+
+        row += 1
 
 def export_to_excel():
-    try:
-        base_data = json.loads(text_base.get("1.0", tk.END))
-        compare_data = json.loads(text_compare.get("1.0", tk.END))
-    except json.JSONDecodeError:
-        messagebox.showerror("JSON Error", "Invalid JSON in input fields.")
-        return
-
-    # 🔹 Preprocess
-    base_data_clean = filter_out_debug(base_data)
-    compare_data_clean = filter_out_debug(compare_data)
-
-    # 🔹 Get promoInfo list
-    base_promos = base_data_clean.get("promoInfo", [])
-    compare_promos = compare_data_clean.get("promoInfo", [])
-
-    # 🔹 Convert to pretty blocks (สมมติฟังก์ชันนี้แปลง promo list เป็น list of JSON strings)
-    partial_base_result = to_pretty_json_blocks(base_promos)
-    partial_compare_result = to_pretty_json_blocks(compare_promos)
-
-    global last_export_data
-    last_export_data = (partial_base_result, partial_compare_result)
-
-    if not last_export_data:
+    if not last_export_data or len(last_export_data) != 2:
         messagebox.showwarning("No Comparison Data", "Please compare JSON files before exporting.")
         return
+
+    base_text, compare_text = last_export_data
+    base_lines = base_text.splitlines()
+    compare_lines = compare_text.splitlines()
 
     diff_fill = PatternFill(start_color="FF9900", end_color="FF9900", fill_type="solid")
     align_top_wrap = Alignment(vertical="top", wrap_text=True)
@@ -264,36 +281,59 @@ def export_to_excel():
         messagebox.showerror("Excel Load Error", str(e))
         return
 
+    # ลบชีทเดิมหากมี และสร้างชีทใหม่
     if "Comparison" in wb.sheetnames:
         del wb["Comparison"]
     ws = wb.create_sheet("Comparison")
 
-    # ====== Row 1: Headers ======
-    ws.cell(row=1, column=1, value="Pro Engine response")
-    ws.cell(row=1, column=2, value="LP response")
-
-    # ====== Row 2: Full JSON input (filtered) ======
-    base_json_str = json.dumps(base_data_clean, indent=2, ensure_ascii=False)
-    compare_json_str = json.dumps(compare_data_clean, indent=2, ensure_ascii=False)
-
-    ws.cell(row=2, column=1, value=base_json_str)
-    ws.cell(row=2, column=2, value=compare_json_str)
-
+    # ปรับความกว้างคอลัมน์
     ws.column_dimensions["A"].width = 80
     ws.column_dimensions["B"].width = 80
+    ws.column_dimensions["C"].width = 80
 
-    ws.cell(row=2, column=1).alignment = Alignment(vertical='top', horizontal='left', wrap_text=True)
-    ws.cell(row=2, column=2).alignment = Alignment(vertical='top', horizontal='left', wrap_text=True)
+    # ปรับความสูงแถว
+    ws.row_dimensions[2].height = 140
 
-    row2_height = max(base_json_str.count("\n"), compare_json_str.count("\n")) * 15
-    ws.row_dimensions[2].height = row2_height
+    # ✅ ดึงข้อมูลจาก GUI
+    try:
+        raw_newpro = text_base.get("1.0", tk.END).strip()
+        raw_online = text_compare.get("1.0", tk.END).strip()
 
-    # ====== Row 4: Section header ======
-    ws.cell(row=4, column=1, value="Pro Engine compare")
-    ws.cell(row=4, column=2, value="LP compare")
+        newpro_obj = json.loads(raw_newpro) if raw_newpro else {}
+        online_obj = json.loads(raw_online) if raw_online else {}
 
-    # ====== Write aligned JSON blocks starting from row 5 ======
-    write_aligned_json_to_excel(ws, 5, partial_base_result, partial_compare_result, diff_fill, align_top_wrap)
+        res_newpro_text = json.dumps(newpro_obj, ensure_ascii=False, indent=2)
+        res_online_text = json.dumps(online_obj, ensure_ascii=False, indent=2)
+    except Exception as e:
+        messagebox.showerror("Input Error", f"Unable to read or parse JSON inputs: {e}")
+        return
+
+    # ✅ เขียน Header
+    ws.cell(row=1, column=1, value="requestpromotion")
+    ws.cell(row=1, column=2, value="Newproengine_Response")
+    ws.cell(row=1, column=3, value="LP_Response")
+
+    # ✅ เขียนข้อมูล JSON input แบบ 1 บรรทัด พร้อมจัดรูปแบบ alignment
+    input_align = Alignment(vertical="top", horizontal="left", wrap_text=True)
+
+    cell_req = ws.cell(row=2, column=1, value="")
+    cell_req.alignment = input_align
+
+    cell_newpro = ws.cell(row=2, column=2, value=res_newpro_text)
+    cell_newpro.alignment = input_align
+
+    cell_online = ws.cell(row=2, column=3, value=res_online_text)
+    cell_online.alignment = input_align
+
+    # ✅ เว้นบรรทัดก่อนเริ่มเปรียบเทียบ
+    ws.cell(row=3, column=1, value="")
+
+    # ✅ เขียน Header
+    ws.cell(row=4, column=2, value="Newproengine_Diffrent")
+    ws.cell(row=4, column=3, value="LP_Diffrent")
+
+    # ✅ เขียนข้อมูลเปรียบเทียบจาก GUI ต่อจากแถวที่ 5
+    write_lines_aligned_to_excel(ws, 5, base_lines, compare_lines, diff_fill, align_top_wrap)
 
     try:
         wb.save(EXCEL_PATH)
@@ -399,7 +439,10 @@ def compare_json():
     highlight_differences(text_partial_compare, total_diff_paths)
     
     global last_export_data
-    last_export_data = (base_result, compare_result)
+    last_export_data = (
+    text_partial_base.get("1.0", tk.END).strip(),
+    text_partial_compare.get("1.0", tk.END).strip()
+)
 
     label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {len(total_diff_paths)} จุด")
 
