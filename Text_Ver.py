@@ -207,140 +207,49 @@ last_export_data = None
 
 # ----------------- Excel Export Utility -----------------
 
-def write_aligned_json_to_excel(ws, row_start, base_obj, compare_obj, indent=0):
-    fill_diff = PatternFill(start_color="FF9900", end_color="FF9900", fill_type="solid")
-    align_top_wrap = Alignment(vertical="top", wrap_text=True)
+def to_pretty_json_blocks(promo_list):
+    import json
+    blocks = []
+    for promo in promo_list:
+        if isinstance(promo, dict):
+            blocks.append(promo)
+        else:
+            try:
+                blocks.append(json.loads(str(promo)))
+            except Exception:
+                continue
+    return blocks
 
-    current_row = row_start
-    indent_str = "  " * indent
-
-    # ช่วยแปลงค่า primitive เป็น json string แบบ indent 0
-    def json_primitive_str(val):
-        return json.dumps(val, ensure_ascii=False)
-
-    # กรณี dict
-    if isinstance(base_obj, dict) or isinstance(compare_obj, dict):
-        ws.cell(current_row, 1, value=indent_str + "{").alignment = align_top_wrap
-        ws.cell(current_row, 2, value=indent_str + "{").alignment = align_top_wrap
-        current_row += 1
-
-        # รวม key ของทั้งสองฝั่ง (ไม่ซ้ำ)
-        keys = set()
-        if isinstance(base_obj, dict):
-            keys.update(base_obj.keys())
-        if isinstance(compare_obj, dict):
-            keys.update(compare_obj.keys())
-        keys = sorted(keys)
-
-        for key in keys:
-            base_val = base_obj.get(key) if isinstance(base_obj, dict) else None
-            comp_val = compare_obj.get(key) if isinstance(compare_obj, dict) else None
-
-            base_has = base_val is not None
-            comp_has = comp_val is not None
-
-            # ถ้าเป็น nested (dict or list) recurse ต่อ
-            if (isinstance(base_val, (dict, list)) or isinstance(comp_val, (dict, list))):
-                # เขียน key line
-                base_key_line = indent_str + f'  "{key}": ' if base_has else ""
-                comp_key_line = indent_str + f'  "{key}": ' if comp_has else ""
-
-                ws.cell(current_row, 1, value=base_key_line).alignment = align_top_wrap
-                ws.cell(current_row, 2, value=comp_key_line).alignment = align_top_wrap
-
-                # ไฮไลต์ถ้า key มีฝั่งเดียว หรือค่าต่างกัน (ในกรณีนี้ถือว่าต่าง เพราะฝั่งนึงว่าง)
-                if base_has != comp_has:
-                    ws.cell(current_row, 1).fill = fill_diff
-                    ws.cell(current_row, 2).fill = fill_diff
-
-                current_row += 1
-
-                # recurse ค่าต่อ
-                current_row = write_aligned_json_to_excel(ws, current_row, base_val or {}, comp_val or {}, indent + 2)
-
-            else:
-                # primitive value
-                base_line = indent_str + f'  "{key}": {json_primitive_str(base_val)}' if base_has else ""
-                comp_line = indent_str + f'  "{key}": {json_primitive_str(comp_val)}' if comp_has else ""
-
-                cell_base = ws.cell(current_row, 1, value=base_line)
-                cell_comp = ws.cell(current_row, 2, value=comp_line)
-                cell_base.alignment = align_top_wrap
-                cell_comp.alignment = align_top_wrap
-
-                # ไฮไลต์ถ้าค่าต่าง
-                if base_line != comp_line:
-                    cell_base.fill = fill_diff
-                    cell_comp.fill = fill_diff
-
-                current_row += 1
-
-        ws.cell(current_row, 1, value=indent_str + "}").alignment = align_top_wrap
-        ws.cell(current_row, 2, value=indent_str + "}").alignment = align_top_wrap
-        current_row += 1
-
-    # กรณี list
-    elif isinstance(base_obj, list) or isinstance(compare_obj, list):
-        ws.cell(current_row, 1, value=indent_str + "[").alignment = align_top_wrap
-        ws.cell(current_row, 2, value=indent_str + "[").alignment = align_top_wrap
-        current_row += 1
-
-        max_len = max(len(base_obj) if isinstance(base_obj, list) else 0,
-                      len(compare_obj) if isinstance(compare_obj, list) else 0)
-
-        for i in range(max_len):
-            base_item = base_obj[i] if (isinstance(base_obj, list) and i < len(base_obj)) else None
-            comp_item = compare_obj[i] if (isinstance(compare_obj, list) and i < len(compare_obj)) else None
-
-            # ถ้า nested dict/list recurse
-            if (isinstance(base_item, (dict, list)) or isinstance(comp_item, (dict, list))):
-                current_row = write_aligned_json_to_excel(ws, current_row, base_item or {}, comp_item or {}, indent + 1)
-            else:
-                base_line = indent_str + "  " + (json_primitive_str(base_item) if base_item is not None else "")
-                comp_line = indent_str + "  " + (json_primitive_str(comp_item) if comp_item is not None else "")
-
-                cell_base = ws.cell(current_row, 1, value=base_line)
-                cell_comp = ws.cell(current_row, 2, value=comp_line)
-                cell_base.alignment = align_top_wrap
-                cell_comp.alignment = align_top_wrap
-
-                if base_line != comp_line:
-                    cell_base.fill = fill_diff
-                    cell_comp.fill = fill_diff
-
-                current_row += 1
-
-        ws.cell(current_row, 1, value=indent_str + "]").alignment = align_top_wrap
-        ws.cell(current_row, 2, value=indent_str + "]").alignment = align_top_wrap
-        current_row += 1
-
-    else:
-        # กรณี primitive ตัวเดียว (เช่น None) ให้เขียนค่าทั้งสองฝั่ง
-        base_line = indent_str + json_primitive_str(base_obj)
-        comp_line = indent_str + json_primitive_str(compare_obj)
-
-        cell_base = ws.cell(current_row, 1, value=base_line)
-        cell_comp = ws.cell(current_row, 2, value=comp_line)
-        cell_base.alignment = align_top_wrap
-        cell_comp.alignment = align_top_wrap
-
-        if base_line != comp_line:
-            cell_base.fill = fill_diff
-            cell_comp.fill = fill_diff
-
-        current_row += 1
-
-    return current_row
-
-
+def write_aligned_json_to_excel():
+    
 
 
 def export_to_excel():
+    try:
+        base_data = json.loads(text_base.get("1.0", tk.END))
+        compare_data = json.loads(text_compare.get("1.0", tk.END))
+    except json.JSONDecodeError:
+        messagebox.showerror("JSON Error", "Invalid JSON in input fields.")
+        return
+
+    # 🔹 Preprocess
+    base_data_clean = filter_out_debug(base_data)
+    compare_data_clean = filter_out_debug(compare_data)
+
+    # 🔹 Get promoInfo list
+    base_promos = base_data_clean.get("promoInfo", [])
+    compare_promos = compare_data_clean.get("promoInfo", [])
+
+    # 🔹 Convert to pretty blocks (สมมติฟังก์ชันนี้แปลง promo list เป็น list of JSON strings)
+    partial_base_result = to_pretty_json_blocks(base_promos)
+    partial_compare_result = to_pretty_json_blocks(compare_promos)
+
+    global last_export_data
+    last_export_data = (partial_base_result, partial_compare_result)
+
     if not last_export_data:
         messagebox.showwarning("No Comparison Data", "Please compare JSON files before exporting.")
         return
-
-    partial_base_result, partial_compare_result = last_export_data
 
     diff_fill = PatternFill(start_color="FF9900", end_color="FF9900", fill_type="solid")
     align_top_wrap = Alignment(vertical="top", wrap_text=True)
@@ -359,29 +268,32 @@ def export_to_excel():
         del wb["Comparison"]
     ws = wb.create_sheet("Comparison")
 
-    # แสดง JSON input เต็ม filtered base & compare
-    ws.cell(row=1, column=1, value="Input: JSON Base (Onlinepro.json)")
-    ws.cell(row=1, column=2, value="Input: JSON Compare (NewPro.json)")
+    # ====== Row 1: Headers ======
+    ws.cell(row=1, column=1, value="Pro Engine response")
+    ws.cell(row=1, column=2, value="LP response")
 
-    base_raw_filtered = filter_out_debug(json.loads(text_base.get("1.0", tk.END)))
-    compare_raw_filtered = filter_out_debug(json.loads(text_compare.get("1.0", tk.END)))
+    # ====== Row 2: Full JSON input (filtered) ======
+    base_json_str = json.dumps(base_data_clean, indent=2, ensure_ascii=False)
+    compare_json_str = json.dumps(compare_data_clean, indent=2, ensure_ascii=False)
 
-    ws.cell(row=2, column=1, value=json.dumps(base_raw_filtered, indent=2, ensure_ascii=False))
-    ws.cell(row=2, column=2, value=json.dumps(compare_raw_filtered, indent=2, ensure_ascii=False))
+    ws.cell(row=2, column=1, value=base_json_str)
+    ws.cell(row=2, column=2, value=compare_json_str)
 
     ws.column_dimensions["A"].width = 80
     ws.column_dimensions["B"].width = 80
-    ws.row_dimensions[2].height = max(
-        ws.cell(row=2, column=1).value.count("\n"),
-        ws.cell(row=2, column=2).value.count("\n")
-    ) * 15
 
-    # หัวข้อ Differences
-    ws.cell(row=4, column=1, value="Result: JSON Base (Differences)")
-    ws.cell(row=4, column=2, value="Result: JSON Compare (Differences)")
+    ws.cell(row=2, column=1).alignment = Alignment(vertical='top', horizontal='left', wrap_text=True)
+    ws.cell(row=2, column=2).alignment = Alignment(vertical='top', horizontal='left', wrap_text=True)
 
-    # เรียกฟังก์ชันเขียน aligned JSON
-    write_aligned_json_to_excel(ws, 5, partial_base_result, partial_compare_result, indent=0)
+    row2_height = max(base_json_str.count("\n"), compare_json_str.count("\n")) * 15
+    ws.row_dimensions[2].height = row2_height
+
+    # ====== Row 4: Section header ======
+    ws.cell(row=4, column=1, value="Pro Engine compare")
+    ws.cell(row=4, column=2, value="LP compare")
+
+    # ====== Write aligned JSON blocks starting from row 5 ======
+    write_aligned_json_to_excel(ws, 5, partial_base_result, partial_compare_result, diff_fill, align_top_wrap)
 
     try:
         wb.save(EXCEL_PATH)
@@ -391,7 +303,6 @@ def export_to_excel():
     except Exception as e:
         messagebox.showerror("Save Failed", f"An unexpected error occurred:\n{e}")
 
-        
 # ----------------- Core Function: compare_json ----------------- #===================อย่าแก้ไขส่วนนี้ลงไป===================
 def compare_json():
     try:
@@ -488,7 +399,7 @@ def compare_json():
     highlight_differences(text_partial_compare, total_diff_paths)
     
     global last_export_data
-    last_export_data = (partial_base_result, partial_compare_result)
+    last_export_data = (base_result, compare_result)
 
     label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {len(total_diff_paths)} จุด")
 
@@ -537,14 +448,14 @@ frame_input.grid_columnconfigure(0, weight=1)
 frame_input.grid_columnconfigure(1, weight=1)
 frame_input.grid_rowconfigure(1, weight=1) # Allow text boxes to expand vertically
 
-ttk.Label(frame_input, text="📘 JSON Base (Onlinepro.json)", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+ttk.Label(frame_input, text="📘 LP", style="Header.TLabel").grid(row=0, column=1, sticky="w")
 text_base = tk.Text(frame_input, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove", height=10)
 text_base.grid(row=1, column=0, sticky="nsew", padx=(0, 5))
 add_right_click_menu(text_base)
 bind_scroll(text_base)
 bind_paste_shortcuts(text_base)
 
-ttk.Label(frame_input, text="📙 JSON Compare (NewPro.json)", style="Header.TLabel").grid(row=0, column=1, sticky="w")
+ttk.Label(frame_input, text="📙 Pro Engine", style="Header.TLabel").grid(row=0, column=0, sticky="w")
 text_compare = tk.Text(frame_input, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove", height=10)
 text_compare.grid(row=1, column=1, sticky="nsew", padx=(5, 0))
 add_right_click_menu(text_compare)
@@ -558,9 +469,9 @@ label_result.grid(row=3, column=0, pady=5)
 
 frame_controls = ttk.Frame(root)
 frame_controls.grid(row=4, column=0, pady=5)
-ttk.Button(frame_controls, text="📋 Copy Base Diff", command=lambda: copy_text(text_partial_base)).pack(side="left", padx=15)
+ttk.Button(frame_controls, text="📋 Copy Pro Engine Diff", command=lambda: copy_text(text_partial_base)).pack(side="left", padx=15)
 ttk.Button(frame_controls, text="📤 Export to Excel", command=export_to_excel).pack(side="left", padx=15)
-ttk.Button(frame_controls, text="📋 Copy Compare Diff", command=lambda: copy_text(text_partial_compare)).pack(side="left", padx=15)
+ttk.Button(frame_controls, text="📋 Copy LP Diff", command=lambda: copy_text(text_partial_compare)).pack(side="left", padx=15)
 
 frame_output = ttk.Frame(root)
 frame_output.grid(row=5, column=0, sticky="nsew", padx=10, pady=(0, 10))
@@ -568,14 +479,14 @@ frame_output.grid_columnconfigure(0, weight=1)
 frame_output.grid_columnconfigure(1, weight=1)
 frame_output.grid_rowconfigure(1, weight=1)
 
-ttk.Label(frame_output, text="📘 Base Differences", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+ttk.Label(frame_output, text="📘 LP Differences", style="Header.TLabel").grid(row=0, column=1, sticky="w")
 text_partial_base = tk.Text(frame_output, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="ridge")
 text_partial_base.grid(row=1, column=0, sticky="nsew", padx=(0, 5))
 add_right_click_menu(text_partial_base)
 bind_scroll(text_partial_base)
 bind_paste_shortcuts(text_partial_base)
 
-ttk.Label(frame_output, text="📙 Compare Differences", style="Header.TLabel").grid(row=0, column=1, sticky="w")
+ttk.Label(frame_output, text="📙 Pro Engine Differences", style="Header.TLabel").grid(row=0, column=0, sticky="w")
 text_partial_compare = tk.Text(frame_output, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="ridge")
 text_partial_compare.grid(row=1, column=1, sticky="nsew", padx=(5, 0))
 add_right_click_menu(text_partial_compare)
