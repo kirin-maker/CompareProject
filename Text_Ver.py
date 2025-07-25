@@ -390,27 +390,37 @@ def export_to_excel():
 
     # ✅ ดึงข้อมูลจาก GUI
     try:
+        raw_request = text_request.get("1.0", tk.END).strip()  # ข้อความดิบ (ไม่แปลง JSON)
         raw_newpro = text_base.get("1.0", tk.END).strip()
         raw_online = text_compare.get("1.0", tk.END).strip()
 
-        newpro_obj = json.loads(raw_newpro) if raw_newpro else {}
-        online_obj = json.loads(raw_online) if raw_online else {}
+        # พยายามแปลง JSON เฉพาะ Newpro
+        try:
+            newpro_obj = json.loads(raw_newpro) if raw_newpro else {}
+            res_newpro_text = json.dumps(newpro_obj, ensure_ascii=False, indent=2)
+        except Exception:
+            res_newpro_text = raw_newpro  # ถ้าแปลงไม่ได้ ใช้ข้อความดิบ
 
-        res_newpro_text = json.dumps(newpro_obj, ensure_ascii=False, indent=2)
-        res_online_text = json.dumps(online_obj, ensure_ascii=False, indent=2)
+        # พยายามแปลง JSON เฉพาะ Online
+        try:
+            online_obj = json.loads(raw_online) if raw_online else {}
+            res_online_text = json.dumps(online_obj, ensure_ascii=False, indent=2)
+        except Exception:
+            res_online_text = raw_online  # ถ้าแปลงไม่ได้ ใช้ข้อความดิบ
+
     except Exception as e:
-        messagebox.showerror("Input Error", f"Unable to read or parse JSON inputs: {e}")
+        messagebox.showerror("Input Error", f"Unable to read inputs: {e}")
         return
 
     # ✅ เขียน Header
-    ws.cell(row=1, column=1, value="requestpromotion")
+    ws.cell(row=1, column=1, value="Request_Promotion")
     ws.cell(row=1, column=2, value="Newproengine_Response")
     ws.cell(row=1, column=3, value="LP_Response")
 
-    # ✅ เขียนข้อมูล JSON input แบบ 1 บรรทัด พร้อมจัดรูปแบบ alignment
+    # ✅ เขียนข้อมูล JSON input และข้อความดิบแบบ 1 บรรทัด พร้อมจัดรูปแบบ alignment
     input_align = Alignment(vertical="top", horizontal="left", wrap_text=True)
 
-    cell_req = ws.cell(row=2, column=1, value="")
+    cell_req = ws.cell(row=2, column=1, value=raw_request)
     cell_req.alignment = input_align
 
     cell_newpro = ws.cell(row=2, column=2, value=res_newpro_text)
@@ -419,14 +429,14 @@ def export_to_excel():
     cell_online = ws.cell(row=2, column=3, value=res_online_text)
     cell_online.alignment = input_align
 
-    # ✅ เว้นบรรทัดก่อนเริ่มเปรียบเทียบ
+    # เว้นบรรทัดก่อนเริ่มเปรียบเทียบ
     ws.cell(row=3, column=1, value="")
 
-    # ✅ เขียน Header
+    # เขียน Header เปรียบเทียบ
     ws.cell(row=4, column=2, value="Newproengine_Diffrent")
     ws.cell(row=4, column=3, value="LP_Diffrent")
 
-    # ✅ เขียนข้อมูลเปรียบเทียบจาก GUI ต่อจากแถวที่ 5
+    # เขียนข้อมูลเปรียบเทียบจาก GUI ต่อจากแถวที่ 5
     write_lines_aligned_to_excel(ws, 5, base_lines, compare_lines, diff_fill, align_top_wrap)
 
     try:
@@ -436,6 +446,7 @@ def export_to_excel():
         messagebox.showerror("Save Failed", "Permission denied. Please close the Excel file and try again.")
     except Exception as e:
         messagebox.showerror("Save Failed", f"An unexpected error occurred:\n{e}")
+
 
 # ----------------- Core Function: compare_json ----------------- #===================อย่าแก้ไขส่วนนี้ลงไป===================
 def compare_json():
@@ -571,47 +582,64 @@ style.map("TButton", background=[("active", "#505354")], foreground=[("active", 
 style.configure("TLabelframe", background=DARK_BG, foreground=DARK_TEXT)
 style.configure("TLabelframe.Label", background=DARK_BG, foreground=DARK_TEXT)
 
-root.grid_rowconfigure(5, weight=1) # Make row 5 (output) expand
-root.grid_columnconfigure(0, weight=1)
+# กำหนดน้ำหนักคอลัมน์และแถวใหม่
+root.grid_columnconfigure(0, weight=1)  # ซ้ายสุด (Request_Promotion)
+root.grid_columnconfigure(1, weight=3)  # ขวา (LP, Pro Engine, Controls, Output)
+root.grid_rowconfigure(5, weight=1)     # แถวล่างสุด (Output)
 
 top_frame = ttk.Frame(root)
 top_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(10, 5))
 top_frame.columnconfigure(0, weight=1)
 ttk.Label(top_frame, text="🧠 JSON Compare Tool", style="Header.TLabel").pack()
 
-frame_input = ttk.Frame(root)
-frame_input.grid(row=1, column=0, sticky="nsew", padx=10)
-frame_input.grid_columnconfigure(0, weight=1)
-frame_input.grid_columnconfigure(1, weight=1)
-frame_input.grid_rowconfigure(1, weight=1) # Allow text boxes to expand vertically
+# --- แยก Frame สำหรับ Request_Promotion (ฝั่งซ้าย) ---
+frame_request = ttk.Frame(root)
+frame_request.grid(row=1, column=0, rowspan=5, sticky="nsew", padx=(10, 5), pady=10)
+frame_request.grid_rowconfigure(1, weight=1)
 
-ttk.Label(frame_input, text="📘 LP", style="Header.TLabel").grid(row=0, column=1, sticky="w")
-text_base = tk.Text(frame_input, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove", height=10)
-text_base.grid(row=1, column=0, sticky="nsew", padx=(0, 5))
+ttk.Label(frame_request, text="📝 Request_Promotion", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+text_request = tk.Text(frame_request, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove")
+text_request.grid(row=1, column=0, sticky="nsew")
+add_right_click_menu(text_request)
+bind_scroll(text_request)
+bind_paste_shortcuts(text_request)
+
+# --- Frame หลักฝั่งขวา (LP, Pro Engine, Controls, Output) ---
+frame_input = ttk.Frame(root)
+frame_input.grid(row=1, column=1, sticky="nsew", padx=10)
+frame_input.grid_columnconfigure(0, weight=1)  # LP
+frame_input.grid_columnconfigure(1, weight=1)  # Pro Engine
+frame_input.grid_rowconfigure(1, weight=1)     # ขยายความสูง
+
+# 📘 LP
+ttk.Label(frame_input, text="📘 LP", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+text_base = tk.Text(frame_input, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove", height=18)
+text_base.grid(row=2, column=0, sticky="nsew", padx=(0,5))
 add_right_click_menu(text_base)
 bind_scroll(text_base)
 bind_paste_shortcuts(text_base)
 
-ttk.Label(frame_input, text="📙 Pro Engine", style="Header.TLabel").grid(row=0, column=0, sticky="w")
-text_compare = tk.Text(frame_input, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove", height=10)
-text_compare.grid(row=1, column=1, sticky="nsew", padx=(5, 0))
+# 📙 Pro Engine
+ttk.Label(frame_input, text="📙 Pro Engine", style="Header.TLabel").grid(row=0, column=1, sticky="w")
+text_compare = tk.Text(frame_input, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove", height=18)
+text_compare.grid(row=2, column=1, sticky="nsew", padx=(5,0))
 add_right_click_menu(text_compare)
 bind_scroll(text_compare)
 bind_paste_shortcuts(text_compare)
 
-ttk.Button(root, text="🔍 Compare JSON", command=compare_json).grid(row=2, column=0, pady=10)
+ttk.Button(root, text="🔍 Compare JSON", command=compare_json).grid(row=2, column=1, pady=10)
 
 label_result = ttk.Label(root, text="", background=DARK_BG, font=("Segoe UI", 12, "bold"))
-label_result.grid(row=3, column=0, pady=5)
+label_result.grid(row=3, column=1, pady=5)
 
 frame_controls = ttk.Frame(root)
-frame_controls.grid(row=4, column=0, pady=5)
+frame_controls.grid(row=4, column=1, pady=5)
 ttk.Button(frame_controls, text="📋 Copy Pro Engine Diff", command=lambda: copy_text(text_partial_base)).pack(side="left", padx=15)
 ttk.Button(frame_controls, text="📤 Export to Excel", command=export_to_excel).pack(side="left", padx=15)
 ttk.Button(frame_controls, text="📋 Copy LP Diff", command=lambda: copy_text(text_partial_compare)).pack(side="left", padx=15)
 
 frame_output = ttk.Frame(root)
-frame_output.grid(row=5, column=0, sticky="nsew", padx=10, pady=(0, 10))
+frame_output.grid(row=5, column=1, sticky="nsew", padx=10, pady=(0, 10))
 frame_output.grid_columnconfigure(0, weight=1)
 frame_output.grid_columnconfigure(1, weight=1)
 frame_output.grid_rowconfigure(1, weight=1)
