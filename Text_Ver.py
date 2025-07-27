@@ -258,23 +258,20 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
         c_key = extract_key(compare_lines[j]) if j < len_c else None
 
         if b_key == c_key:
-            # keys ตรงกัน เขียนคู่กัน
-            b_line = base_lines[i]
-            c_line = compare_lines[j]
+            b_line = base_lines[i] if i < len_b else "Nodata"
+            c_line = compare_lines[j] if j < len_c else "Nodata"
             i += 1
             j += 1
 
         elif c_key is not None and (b_key != c_key):
-            # หา b_line ที่ key ตรงกับ c_key
             found_idx = None
             for k in range(i + 1, len_b):
                 if extract_key(base_lines[k]) == c_key:
                     found_idx = k
                     break
             if found_idx is not None:
-                # ข้าม b_line ที่ไม่ตรงก่อนหน้านั้น → เขียน b_line กับ "Nodata"
                 while i < found_idx:
-                    b_line = base_lines[i]
+                    b_line = base_lines[i] if i < len_b else "Nodata"
                     c_line = "Nodata"
                     i += 1
 
@@ -287,29 +284,25 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
                         cell_c.fill = diff_fill
                     row += 1
 
-                # ตอนนี้ b_line[i] key ตรงกับ c_key
-                b_line = base_lines[i]
-                c_line = compare_lines[j]
+                b_line = base_lines[i] if i < len_b else "Nodata"
+                c_line = compare_lines[j] if j < len_c else "Nodata"
                 i += 1
                 j += 1
             else:
-                # b_line Nodata key นี้ เขียน "Nodata" ใน b_line
                 b_line = "Nodata"
-                c_line = compare_lines[j]
+                c_line = compare_lines[j] if j < len_c else "Nodata"
                 j += 1
 
         elif b_key is not None and (c_key != b_key):
-            # หา c_line ที่ key ตรงกับ b_key
             found_idx = None
             for k in range(j + 1, len_c):
                 if extract_key(compare_lines[k]) == b_key:
                     found_idx = k
                     break
             if found_idx is not None:
-                # ข้าม c_line ที่ไม่ตรงก่อนหน้านั้น → เขียน "Nodata" กับ c_line
                 while j < found_idx:
                     b_line = "Nodata"
-                    c_line = compare_lines[j]
+                    c_line = compare_lines[j] if j < len_c else "Nodata"
                     j += 1
 
                     cell_b = ws.cell(row=row, column=2, value=b_line)
@@ -321,26 +314,21 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
                         cell_c.fill = diff_fill
                     row += 1
 
-                # ตอนนี้ c_line[j] key ตรงกับ b_key
-                b_line = base_lines[i]
-                c_line = compare_lines[j]
+                b_line = base_lines[i] if i < len_b else "Nodata"
+                c_line = compare_lines[j] if j < len_c else "Nodata"
                 i += 1
                 j += 1
             else:
-                # c_line Nodata key นี้ เขียน "Nodata" ใน c_line
-                b_line = base_lines[i]
+                b_line = base_lines[i] if i < len_b else "Nodata"
                 c_line = "Nodata"
                 i += 1
 
         else:
-            # กรณีไม่มี key หรือ key ทั้งสอง None
-            # เขียนบรรทัดปกติ ถ้ามี
             b_line = base_lines[i] if i < len_b else "Nodata"
             c_line = compare_lines[j] if j < len_c else "Nodata"
             i += (i < len_b)
             j += (j < len_c)
 
-        # เขียนบรรทัดลง Excel
         cell_b = ws.cell(row=row, column=2, value=b_line)
         cell_c = ws.cell(row=row, column=3, value=c_line)
         cell_b.alignment = align_top_wrap
@@ -352,6 +340,7 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
             if c_line.strip() not in ("Nodata", ""):
                 cell_c.fill = diff_fill
         row += 1
+
 
 def export_to_excel():
     if not last_export_data or len(last_export_data) != 2:
