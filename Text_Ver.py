@@ -101,7 +101,7 @@ def format_full_output(data):
         )
         for promo in sorted_promos:
             promo_number = promo.get("promoNumber", "N/A")
-            output_lines.append(f"========== promoNumber: {promo_number} ==========")
+            output_lines.append(f"promoNumber: {promo_number}")
             output_lines.append(json.dumps(promo, indent=2, ensure_ascii=False))
             output_lines.append("")
     
