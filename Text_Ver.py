@@ -241,6 +241,36 @@ def to_pretty_json_blocks(promo_list):
     return blocks
 
 
+def swap_privilegePromoInfo_lines(base_lines, compare_lines):
+    def extract_key(line):
+        stripped = line.lstrip()
+        if ":" in stripped:
+            return stripped.split(":", 1)[0].strip().strip('"')
+        return None
+
+    # หา index ของ privilegePromoInfo ใน base_lines
+    base_idx = None
+    for idx, line in enumerate(base_lines):
+        if extract_key(line) == "privilegePromoInfo":
+            base_idx = idx
+            break
+
+    # หา index ของ privilegePromoInfo ใน compare_lines
+    compare_idx = None
+    for idx, line in enumerate(compare_lines):
+        if extract_key(line) == "privilegePromoInfo":
+            compare_idx = idx
+            break
+
+    # ถ้าพบทั้งสองฝั่ง และตำแหน่งไม่เท่ากัน ให้สลับบรรทัด
+    if base_idx is not None and compare_idx is not None and base_idx != compare_idx:
+        # สลับบรรทัดใน base_lines
+        base_lines[base_idx], base_lines[compare_idx] = base_lines[compare_idx], base_lines[base_idx]
+        # สลับบรรทัดใน compare_lines
+        compare_lines[base_idx], compare_lines[compare_idx] = compare_lines[compare_idx], compare_lines[base_idx]
+
+    return base_lines, compare_lines
+
 def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_fill, align_top_wrap):
     row = start_row
 
@@ -437,6 +467,7 @@ def export_to_excel():
     ws.cell(row=4, column=3, value="LP_Diffrent")
 
     # เขียนข้อมูลเปรียบเทียบจาก GUI ต่อจากแถวที่ 5
+    base_lines, compare_lines = swap_privilegePromoInfo_lines(base_lines, compare_lines)
     write_lines_aligned_to_excel(ws, 5, base_lines, compare_lines, diff_fill, align_top_wrap)
 
     try:
