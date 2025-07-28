@@ -6,6 +6,7 @@ from deepdiff import DeepDiff
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill, Alignment
 import os
+from collections import OrderedDict
 
 # ----------------- JSON Utility -----------------
 def remove_description(obj):
@@ -438,77 +439,39 @@ def export_to_excel():
 
 
 # ----------------- Core Function: compare_json ----------------- #===================อย่าแก้ไขส่วนนี้ลงไป===================
-from collections import OrderedDict
 
 def compare_json():
-    def fill_missing_keys_positionally(dict1, dict2):
+    def fill_missing_keys_positionally(val1, val2):
         """
-        เติม key ที่ขาดใน dict1 หรือ dict2 ด้วย "Nodata"
-        และแทรกในตำแหน่งเดียวกับฝั่งที่มี key
-        recursive สำหรับ dict และ list
+        เติม 'Nodata' ในตำแหน่งที่ขาด ทั้ง dict และ list (recursive)
         """
-        if isinstance(dict1, dict) and isinstance(dict2, dict):
-            keys1 = list(dict1.keys())
-            keys2 = list(dict2.keys())
+        if isinstance(val1, dict) and isinstance(val2, dict):
+            all_keys = list(OrderedDict.fromkeys(list(val1.keys()) + list(val2.keys())))
+            new_val1 = OrderedDict()
+            new_val2 = OrderedDict()
+            for k in all_keys:
+                v1 = val1.get(k, "Nodata")
+                v2 = val2.get(k, "Nodata")
+                v1, v2 = fill_missing_keys_positionally(v1, v2)
+                new_val1[k] = v1
+                new_val2[k] = v2
+            return new_val1, new_val2
 
-            # รวมลำดับ key โดยไม่ซ้ำ (ตามลำดับปรากฏในทั้งสอง dict)
-            all_keys_order = []
-            i, j = 0, 0
-            while i < len(keys1) or j < len(keys2):
-                if i < len(keys1):
-                    if keys1[i] not in all_keys_order:
-                        all_keys_order.append(keys1[i])
-                    i += 1
-                if j < len(keys2):
-                    if keys2[j] not in all_keys_order:
-                        all_keys_order.append(keys2[j])
-                    j += 1
-
-            new_dict1 = OrderedDict()
-            new_dict2 = OrderedDict()
-
-            for k in all_keys_order:
-                v1 = dict1.get(k, "Nodata")
-                v2 = dict2.get(k, "Nodata")
-
-                # ถ้าเป็น dict ให้ recursive
-                if isinstance(v1, dict) or isinstance(v2, dict):
-                    if not isinstance(v1, dict):
-                        v1 = {}
-                    if not isinstance(v2, dict):
-                        v2 = {}
-                    v1, v2 = fill_missing_keys_positionally(v1, v2)
-
-                # ถ้าเป็น list ให้ recursive กับ element
-                elif isinstance(v1, list) or isinstance(v2, list):
-                    if not isinstance(v1, list):
-                        v1 = []
-                    if not isinstance(v2, list):
-                        v2 = []
-                    max_len = max(len(v1), len(v2))
-                    new_list1 = []
-                    new_list2 = []
-                    for idx in range(max_len):
-                        e1 = v1[idx] if idx < len(v1) else "Nodata"
-                        e2 = v2[idx] if idx < len(v2) else "Nodata"
-                        if isinstance(e1, dict) or isinstance(e2, dict):
-                            if not isinstance(e1, dict):
-                                e1 = {}
-                            if not isinstance(e2, dict):
-                                e2 = {}
-                            e1, e2 = fill_missing_keys_positionally(e1, e2)
-                        new_list1.append(e1)
-                        new_list2.append(e2)
-                    v1 = new_list1
-                    v2 = new_list2
-
-                new_dict1[k] = v1
-                new_dict2[k] = v2
-
-            return new_dict1, new_dict2
+        elif isinstance(val1, list) and isinstance(val2, list):
+            max_len = max(len(val1), len(val2))
+            new_list1 = []
+            new_list2 = []
+            for i in range(max_len):
+                e1 = val1[i] if i < len(val1) else "Nodata"
+                e2 = val2[i] if i < len(val2) else "Nodata"
+                e1, e2 = fill_missing_keys_positionally(e1, e2)
+                new_list1.append(e1)
+                new_list2.append(e2)
+            return new_list1, new_list2
 
         else:
-            return dict1, dict2
+            # กรณีอื่น ๆ คืนค่าตามเดิม
+            return val1, val2
 
     try:
         base_data = json.loads(text_base.get("1.0", tk.END))
@@ -530,30 +493,32 @@ def compare_json():
     partial_compare_result = {"promoInfo": []}
     total_diff_paths = []
 
-    # รวม promo ทั้งสองฝั่งทั้งหมด (ไม่ใช้แค่ common)
-    all_promo_numbers = sorted(set(base_promos.keys()) | set(compare_promos.keys()), key=lambda x: int(x))
+    # เปรียบเทียบ promoInfo
+    common_promo_numbers = sorted(set(base_promos.keys()) & set(compare_promos.keys()), key=lambda x: int(x))
 
-    for promo_num in all_promo_numbers:
-        base_promo = base_promos.get(promo_num, {})
-        compare_promo = compare_promos.get(promo_num, {})
+    for promo_num in common_promo_numbers:
+        base_promo = base_promos[promo_num]
+        compare_promo = compare_promos[promo_num]
 
         diff = DeepDiff(base_promo, compare_promo, ignore_order=False, report_repetition=True, view="tree")
 
+        if not diff:
+            continue
+
         path_list = []
-        if diff:
-            for section in diff:
-                for change in diff[section]:
-                    if hasattr(change, 'path'):
-                        path = change.path(output_format='list')
-                        s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
-                        path_list.append(s)
+        for section in diff:
+            for change in diff[section]:
+                if hasattr(change, 'path'):
+                    path = change.path(output_format='list')
+                    s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
+                    path_list.append(s)
 
         total_diff_paths.extend([f"['promoInfo'][{len(partial_base_result['promoInfo'])}]{p}" for p in path_list])
 
         partial_base = build_partial_json(base_promo, path_list)
         partial_compare = build_partial_json(compare_promo, path_list)
 
-        # เติม key ที่อีกฝั่งไม่มี (ในตำแหน่งเดียวกัน)
+        # เติม 'Nodata' ให้ครบทุกตำแหน่งที่ขาดจริงๆ
         partial_base, partial_compare = fill_missing_keys_positionally(partial_base, partial_compare)
 
         partial_base["promoNumber"] = promo_num
@@ -562,37 +527,38 @@ def compare_json():
         partial_base_result["promoInfo"].append(partial_base)
         partial_compare_result["promoInfo"].append(partial_compare)
 
-    # เปรียบเทียบ keys อื่นนอกเหนือ promoInfo
+    # ฟิลด์นอก promoInfo
     other_keys = set(base_filtered.keys()) | set(compare_filtered.keys())
     other_keys.discard("promoInfo")
 
     for key in sorted(other_keys):
-        base_value = base_filtered.get(key, "Nodata")
-        compare_value = compare_filtered.get(key, "Nodata")
+        if key not in base_filtered or key not in compare_filtered:
+            continue
 
-        diff = DeepDiff(base_value, compare_value, ignore_order=False, report_repetition=True, view="tree")
+        diff = DeepDiff(base_filtered[key], compare_filtered[key], ignore_order=False, report_repetition=True, view="tree")
+
+        if not diff:
+            continue
 
         path_list = []
-        if diff:
-            for section in diff:
-                for change in diff[section]:
-                    if hasattr(change, 'path'):
-                        path = change.path(output_format='list')
-                        s = f"['{key}']" + "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
-                        path_list.append(s)
+        for section in diff:
+            for change in diff[section]:
+                if hasattr(change, 'path'):
+                    path = change.path(output_format='list')
+                    s = f"['{key}']" + "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
+                    path_list.append(s)
 
-            total_diff_paths.extend(path_list)
+        total_diff_paths.extend(path_list)
 
-        partial_base = build_partial_json({key: base_value}, path_list)
-        partial_compare = build_partial_json({key: compare_value}, path_list)
+        partial_base = build_partial_json(base_filtered, path_list)
+        partial_compare = build_partial_json(compare_filtered, path_list)
 
-        # เติม key ที่อีกฝั่งไม่มี (ในตำแหน่งเดียวกัน)
         partial_base, partial_compare = fill_missing_keys_positionally(partial_base, partial_compare)
 
         partial_base_result.update(partial_base)
         partial_compare_result.update(partial_compare)
 
-    # แสดงผลลัพธ์ใน GUI
+    # แสดงผล
     base_result = format_full_output(partial_base_result)
     compare_result = format_full_output(partial_compare_result)
 
@@ -613,8 +579,6 @@ def compare_json():
     )
 
     label_result.config(text=f"🔍 พบความแตกต่างทั้งหมด {len(total_diff_paths)} จุด")
-
-
 # ----------------- GUI Setup -----------------
 root = tk.Tk()
 root.title("🧠 JSON Compare Tool")
