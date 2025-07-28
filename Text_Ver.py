@@ -245,25 +245,30 @@ def to_pretty_json_blocks(promo_list):
 def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_fill, align_top_wrap):
     row = start_row
 
+    len_b, len_c = len(base_lines), len(compare_lines)
+    i, j = 0, 0
+
     def extract_key(line):
         stripped = line.lstrip()
         if ":" in stripped:
             return stripped.split(":", 1)[0].strip().strip('"')
         return None
 
-    i, j = 0, 0
-    len_b, len_c = len(base_lines), len(compare_lines)
-
     while i < len_b or j < len_c:
-        b_key = extract_key(base_lines[i]) if i < len_b else None
-        c_key = extract_key(compare_lines[j]) if j < len_c else None
+        b_line = base_lines[i] if i < len_b else None
+        c_line = compare_lines[j] if j < len_c else None
 
+        b_key = extract_key(b_line) if b_line is not None else None
+        c_key = extract_key(c_line) if c_line is not None else None
+
+        # กรณี key ตรงกันหรือทั้งสอง None (บรรทัดปกติ)
         if b_key == c_key:
-            b_line = base_lines[i] if i < len_b else "Nodata"
-            c_line = compare_lines[j] if j < len_c else "Nodata"
+            val_b = b_line if b_line is not None else "Nodata"
+            val_c = c_line if c_line is not None else "Nodata"
             i += 1
             j += 1
 
+        # กรณี key ต่างกัน, แต่ key c_key มีใน base_lines ข้างหน้า
         elif c_key is not None and (b_key != c_key):
             found_idx = None
             for k in range(i + 1, len_b):
@@ -271,29 +276,17 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
                     found_idx = k
                     break
             if found_idx is not None:
-                while i < found_idx:
-                    b_line = base_lines[i] if i < len_b else "Nodata"
-                    c_line = "Nodata"
-                    i += 1
-
-                    cell_b = ws.cell(row=row, column=2, value=b_line)
-                    cell_c = ws.cell(row=row, column=3, value=c_line)
-                    cell_b.alignment = align_top_wrap
-                    cell_c.alignment = align_top_wrap
-                    if b_line.strip() != c_line.strip():
-                        cell_b.fill = diff_fill
-                        cell_c.fill = diff_fill
-                    row += 1
-
-                b_line = base_lines[i] if i < len_b else "Nodata"
-                c_line = compare_lines[j] if j < len_c else "Nodata"
+                # เติม "Nodata" ใน compare_lines จนกว่าจะเจอ key c_key ใน base_lines
+                val_b = b_line if b_line is not None else "Nodata"
+                val_c = "Nodata"
                 i += 1
-                j += 1
             else:
-                b_line = "Nodata"
-                c_line = compare_lines[j] if j < len_c else "Nodata"
+                # กรณี key c_key ไม่มีใน base_lines, เติม "Nodata" ใน base_lines
+                val_b = "Nodata"
+                val_c = c_line if c_line is not None else "Nodata"
                 j += 1
 
+        # กรณี key ต่างกัน, แต่ key b_key มีใน compare_lines ข้างหน้า
         elif b_key is not None and (c_key != b_key):
             found_idx = None
             for k in range(j + 1, len_c):
@@ -301,45 +294,36 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
                     found_idx = k
                     break
             if found_idx is not None:
-                while j < found_idx:
-                    b_line = "Nodata"
-                    c_line = compare_lines[j] if j < len_c else "Nodata"
-                    j += 1
-
-                    cell_b = ws.cell(row=row, column=2, value=b_line)
-                    cell_c = ws.cell(row=row, column=3, value=c_line)
-                    cell_b.alignment = align_top_wrap
-                    cell_c.alignment = align_top_wrap
-                    if b_line.strip() != c_line.strip():
-                        cell_b.fill = diff_fill
-                        cell_c.fill = diff_fill
-                    row += 1
-
-                b_line = base_lines[i] if i < len_b else "Nodata"
-                c_line = compare_lines[j] if j < len_c else "Nodata"
-                i += 1
+                # เติม "Nodata" ใน base_lines จนกว่าจะเจอ key b_key ใน compare_lines
+                val_b = "Nodata"
+                val_c = c_line if c_line is not None else "Nodata"
                 j += 1
             else:
-                b_line = base_lines[i] if i < len_b else "Nodata"
-                c_line = "Nodata"
+                # กรณี key b_key ไม่มีใน compare_lines, เติม "Nodata" ใน compare_lines
+                val_b = b_line if b_line is not None else "Nodata"
+                val_c = "Nodata"
                 i += 1
 
         else:
-            b_line = base_lines[i] if i < len_b else "Nodata"
-            c_line = compare_lines[j] if j < len_c else "Nodata"
+            # กรณีอื่น ๆ เติม "Nodata" หากไม่มีบรรทัด
+            val_b = b_line if b_line is not None else "Nodata"
+            val_c = c_line if c_line is not None else "Nodata"
             i += (i < len_b)
             j += (j < len_c)
 
-        cell_b = ws.cell(row=row, column=2, value=b_line)
-        cell_c = ws.cell(row=row, column=3, value=c_line)
+        cell_b = ws.cell(row=row, column=2, value=val_b)
+        cell_c = ws.cell(row=row, column=3, value=val_c)
+
         cell_b.alignment = align_top_wrap
         cell_c.alignment = align_top_wrap
 
-        if b_line.strip() != c_line.strip():
-            if b_line.strip() not in ("Nodata", ""):
+        # ไฮไลท์ถ้าข้อความต่างกัน (เว้นว่าง "" ไม่ไฮไลท์)
+        if val_b.strip() != val_c.strip():
+            if val_b.strip() != "":
                 cell_b.fill = diff_fill
-            if c_line.strip() not in ("Nodata", ""):
+            if val_c.strip() != "":
                 cell_c.fill = diff_fill
+
         row += 1
 
 
