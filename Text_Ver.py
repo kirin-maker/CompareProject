@@ -242,6 +242,40 @@ def to_pretty_json_blocks(promo_list):
     return blocks
 
 
+def filter_out_debug(data):
+    if isinstance(data, dict):
+        keys_to_remove = ["debug", "qualifySpend", "quantity", "numberOfTotalSavers"]
+        for key in keys_to_remove:
+            data.pop(key, None)
+        for v in data.values():
+            filter_out_debug(v)
+    elif isinstance(data, list):
+        for item in data:
+            filter_out_debug(item)
+    return data
+
+def to_pretty_json_blocks(promo_list):
+    blocks = []
+    for promo in promo_list:
+        if not isinstance(promo, dict):
+            try:
+                promo = json.loads(str(promo))
+            except Exception:
+                continue
+
+        # ดึงและแปลง promoNumber
+        promo_number_raw = promo.get("promoNumber", "UNKNOWN")
+        try:
+            promo_number = int(promo_number_raw)
+        except Exception:
+            promo_number = promo_number_raw  # fallback เช่น "UNKNOWN"
+
+        header = f"{promo_number}"  # ใช้เลขอย่างเดียว
+        pretty_json = json.dumps(promo, indent=2, ensure_ascii=False)
+        blocks.append(f"{header}\n{pretty_json}")
+    return blocks
+
+
 def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_fill, align_top_wrap):
     row = start_row
 
@@ -263,8 +297,8 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
 
         # กรณี key ตรงกันหรือทั้งสอง None (บรรทัดปกติ)
         if b_key == c_key:
-            val_b = b_line if b_line is not None else "Nodata"
-            val_c = c_line if c_line is not None else "Nodata"
+            val_b = b_line if b_line is not None else ""
+            val_c = c_line if c_line is not None else ""
             i += 1
             j += 1
 
@@ -277,13 +311,13 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
                     break
             if found_idx is not None:
                 # เติม "Nodata" ใน compare_lines จนกว่าจะเจอ key c_key ใน base_lines
-                val_b = b_line if b_line is not None else "Nodata"
-                val_c = "Nodata"
+                val_b = b_line if b_line is not None else ""
+                val_c = ""
                 i += 1
             else:
                 # กรณี key c_key ไม่มีใน base_lines, เติม "Nodata" ใน base_lines
-                val_b = "Nodata"
-                val_c = c_line if c_line is not None else "Nodata"
+                val_b = ""
+                val_c = c_line if c_line is not None else ""
                 j += 1
 
         # กรณี key ต่างกัน, แต่ key b_key มีใน compare_lines ข้างหน้า
@@ -295,19 +329,19 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
                     break
             if found_idx is not None:
                 # เติม "Nodata" ใน base_lines จนกว่าจะเจอ key b_key ใน compare_lines
-                val_b = "Nodata"
-                val_c = c_line if c_line is not None else "Nodata"
+                val_b = ""
+                val_c = c_line if c_line is not None else ""
                 j += 1
             else:
                 # กรณี key b_key ไม่มีใน compare_lines, เติม "Nodata" ใน compare_lines
-                val_b = b_line if b_line is not None else "Nodata"
-                val_c = "Nodata"
+                val_b = b_line if b_line is not None else ""
+                val_c = ""
                 i += 1
 
         else:
             # กรณีอื่น ๆ เติม "Nodata" หากไม่มีบรรทัด
-            val_b = b_line if b_line is not None else "Nodata"
-            val_c = c_line if c_line is not None else "Nodata"
+            val_b = b_line if b_line is not None else ""
+            val_c = c_line if c_line is not None else ""
             i += (i < len_b)
             j += (j < len_c)
 
@@ -424,39 +458,8 @@ def export_to_excel():
 
 # ----------------- Core Function: compare_json ----------------- #===================อย่าแก้ไขส่วนนี้ลงไป===================
 
+
 def compare_json():
-    def fill_missing_keys_positionally(val1, val2):
-        """
-        เติม 'Nodata' ในตำแหน่งที่ขาด ทั้ง dict และ list (recursive)
-        """
-        if isinstance(val1, dict) and isinstance(val2, dict):
-            all_keys = list(OrderedDict.fromkeys(list(val1.keys()) + list(val2.keys())))
-            new_val1 = OrderedDict()
-            new_val2 = OrderedDict()
-            for k in all_keys:
-                v1 = val1.get(k, "Nodata")
-                v2 = val2.get(k, "Nodata")
-                v1, v2 = fill_missing_keys_positionally(v1, v2)
-                new_val1[k] = v1
-                new_val2[k] = v2
-            return new_val1, new_val2
-
-        elif isinstance(val1, list) and isinstance(val2, list):
-            max_len = max(len(val1), len(val2))
-            new_list1 = []
-            new_list2 = []
-            for i in range(max_len):
-                e1 = val1[i] if i < len(val1) else "Nodata"
-                e2 = val2[i] if i < len(val2) else "Nodata"
-                e1, e2 = fill_missing_keys_positionally(e1, e2)
-                new_list1.append(e1)
-                new_list2.append(e2)
-            return new_list1, new_list2
-
-        else:
-            # กรณีอื่น ๆ คืนค่าตามเดิม
-            return val1, val2
-
     try:
         base_data = json.loads(text_base.get("1.0", tk.END))
         compare_data = json.loads(text_compare.get("1.0", tk.END))
@@ -477,41 +480,50 @@ def compare_json():
     partial_compare_result = {"promoInfo": []}
     total_diff_paths = []
 
-    # เปรียบเทียบ promoInfo
-    common_promo_numbers = sorted(set(base_promos.keys()) & set(compare_promos.keys()), key=lambda x: int(x))
+    all_promo_numbers = sorted(set(base_promos.keys()) | set(compare_promos.keys()), key=lambda x: int(x))
 
-    for promo_num in common_promo_numbers:
-        base_promo = base_promos[promo_num]
-        compare_promo = compare_promos[promo_num]
+    for promo_num in all_promo_numbers:
+        base_promo = base_promos.get(promo_num)
+        compare_promo = compare_promos.get(promo_num)
 
-        diff = DeepDiff(base_promo, compare_promo, ignore_order=False, report_repetition=True, view="tree")
+        if base_promo and compare_promo:
+            # กรณีมีทั้งสองฝั่ง
+            diff = DeepDiff(base_promo, compare_promo, ignore_order=False, report_repetition=True, view="tree")
 
-        if not diff:
-            continue
+            if not diff:
+                continue  # ไม่มี diff ก็ไม่ต้องใส่
 
-        path_list = []
-        for section in diff:
-            for change in diff[section]:
-                if hasattr(change, 'path'):
-                    path = change.path(output_format='list')
-                    s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
-                    path_list.append(s)
+            path_list = []
+            for section in diff:
+                for change in diff[section]:
+                    if hasattr(change, 'path'):
+                        path = change.path(output_format='list')
+                        s = "".join(f"[{p}]" if isinstance(p, int) else f"['{p}']" for p in path)
+                        path_list.append(s)
 
-        total_diff_paths.extend([f"['promoInfo'][{len(partial_base_result['promoInfo'])}]{p}" for p in path_list])
+            total_diff_paths.extend([f"['promoInfo'][{len(partial_base_result['promoInfo'])}]{p}" for p in path_list])
 
-        partial_base = build_partial_json(base_promo, path_list)
-        partial_compare = build_partial_json(compare_promo, path_list)
+            partial_base = build_partial_json(base_promo, path_list)
+            partial_base["promoNumber"] = promo_num
+            partial_compare = build_partial_json(compare_promo, path_list)
+            partial_compare["promoNumber"] = promo_num
 
-        # เติม 'Nodata' ให้ครบทุกตำแหน่งที่ขาดจริงๆ
-        partial_base, partial_compare = fill_missing_keys_positionally(partial_base, partial_compare)
+        elif base_promo and not compare_promo:
+            # มีเฉพาะใน Base
+            partial_base = base_promo.copy()
+            partial_base["promoNumber"] = promo_num
+            partial_compare = {"promoNumber": promo_num}  # ว่างเปล่า
 
-        partial_base["promoNumber"] = promo_num
-        partial_compare["promoNumber"] = promo_num
+        elif compare_promo and not base_promo:
+            # มีเฉพาะใน Compare
+            partial_compare = compare_promo.copy()
+            partial_compare["promoNumber"] = promo_num
+            partial_base = {"promoNumber": promo_num}  # ว่างเปล่า
 
         partial_base_result["promoInfo"].append(partial_base)
         partial_compare_result["promoInfo"].append(partial_compare)
 
-    # ฟิลด์นอก promoInfo
+    # ==== เปรียบเทียบฟิลด์อื่น ๆ ที่ไม่ใช่ promoInfo ====
     other_keys = set(base_filtered.keys()) | set(compare_filtered.keys())
     other_keys.discard("promoInfo")
 
@@ -537,12 +549,10 @@ def compare_json():
         partial_base = build_partial_json(base_filtered, path_list)
         partial_compare = build_partial_json(compare_filtered, path_list)
 
-        partial_base, partial_compare = fill_missing_keys_positionally(partial_base, partial_compare)
-
         partial_base_result.update(partial_base)
         partial_compare_result.update(partial_compare)
 
-    # แสดงผล
+    # ==== สร้างผลลัพธ์และแสดงผล ====
     base_result = format_full_output(partial_base_result)
     compare_result = format_full_output(partial_compare_result)
 
