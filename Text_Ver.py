@@ -278,7 +278,6 @@ def to_pretty_json_blocks(promo_list):
 
 def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_fill, align_top_wrap):
     row = start_row
-
     len_b, len_c = len(base_lines), len(compare_lines)
     i, j = 0, 0
 
@@ -292,73 +291,120 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
         b_line = base_lines[i] if i < len_b else None
         c_line = compare_lines[j] if j < len_c else None
 
-        b_key = extract_key(b_line) if b_line is not None else None
-        c_key = extract_key(c_line) if c_line is not None else None
+        b_key = extract_key(b_line) if b_line else None
+        c_key = extract_key(c_line) if c_line else None
 
-        # กรณี key ตรงกันหรือทั้งสอง None (บรรทัดปกติ)
         if b_key == c_key:
-            val_b = b_line if b_line is not None else ""
-            val_c = c_line if c_line is not None else ""
+            val_b = b_line or ""
+            val_c = c_line or ""
             i += 1
             j += 1
-
-        # กรณี key ต่างกัน, แต่ key c_key มีใน base_lines ข้างหน้า
-        elif c_key is not None and (b_key != c_key):
+        elif c_key and (b_key != c_key):
             found_idx = None
             for k in range(i + 1, len_b):
                 if extract_key(base_lines[k]) == c_key:
                     found_idx = k
                     break
             if found_idx is not None:
-                # เติม "Nodata" ใน compare_lines จนกว่าจะเจอ key c_key ใน base_lines
-                val_b = b_line if b_line is not None else ""
+                val_b = b_line or ""
                 val_c = ""
                 i += 1
             else:
-                # กรณี key c_key ไม่มีใน base_lines, เติม "Nodata" ใน base_lines
                 val_b = ""
-                val_c = c_line if c_line is not None else ""
+                val_c = c_line or ""
                 j += 1
-
-        # กรณี key ต่างกัน, แต่ key b_key มีใน compare_lines ข้างหน้า
-        elif b_key is not None and (c_key != b_key):
+        elif b_key and (c_key != b_key):
             found_idx = None
             for k in range(j + 1, len_c):
                 if extract_key(compare_lines[k]) == b_key:
                     found_idx = k
                     break
             if found_idx is not None:
-                # เติม "Nodata" ใน base_lines จนกว่าจะเจอ key b_key ใน compare_lines
                 val_b = ""
-                val_c = c_line if c_line is not None else ""
+                val_c = c_line or ""
                 j += 1
             else:
-                # กรณี key b_key ไม่มีใน compare_lines, เติม "Nodata" ใน compare_lines
-                val_b = b_line if b_line is not None else ""
+                val_b = b_line or ""
                 val_c = ""
                 i += 1
-
         else:
-            # กรณีอื่น ๆ เติม "Nodata" หากไม่มีบรรทัด
-            val_b = b_line if b_line is not None else ""
-            val_c = c_line if c_line is not None else ""
+            val_b = b_line or ""
+            val_c = c_line or ""
             i += (i < len_b)
             j += (j < len_c)
 
         cell_b = ws.cell(row=row, column=2, value=val_b)
         cell_c = ws.cell(row=row, column=3, value=val_c)
-
         cell_b.alignment = align_top_wrap
         cell_c.alignment = align_top_wrap
 
-        # ไฮไลท์ถ้าข้อความต่างกัน (เว้นว่าง "" ไม่ไฮไลท์)
         if val_b.strip() != val_c.strip():
-            if val_b.strip() != "":
+            if val_b.strip():
                 cell_b.fill = diff_fill
-            if val_c.strip() != "":
+            if val_c.strip():
                 cell_c.fill = diff_fill
 
         row += 1
+    return row
+
+
+def split_promos(lines):
+    promos = []
+    current_block = []
+    for line in lines:
+        if line.strip().startswith("promoNumber:"):
+            if current_block:
+                promos.append(current_block)
+            current_block = [line]
+        else:
+            current_block.append(line)
+    if current_block:
+        promos.append(current_block)
+    return promos
+
+
+def extract_promo_number(block):
+    for line in block:
+        line = line.strip()
+        if line.startswith("promoNumber:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def try_parse_int(val):
+    try:
+        return int(val)
+    except:
+        return val  # fallback
+
+
+def pair_promos(base_lines, compare_lines):
+    base_blocks = split_promos(base_lines)
+    compare_blocks = split_promos(compare_lines)
+
+    base_dict = {extract_promo_number(b): b for b in base_blocks}
+    compare_dict = {extract_promo_number(c): c for c in compare_blocks}
+
+    # ✅ แก้ตรงนี้ให้ sort promoNumber ตามลำดับตัวเลข (หากเป็นเลข)
+    all_promos = sorted(
+        set(base_dict.keys()) | set(compare_dict.keys()),
+        key=lambda x: (x is None, try_parse_int(x))
+    )
+
+    paired_blocks = []
+    for promo in all_promos:
+        b_block = base_dict.get(promo, [])
+        c_block = compare_dict.get(promo, [])
+        paired_blocks.append((b_block, c_block))
+    return paired_blocks
+
+
+def write_promos_to_excel(ws, start_row, base_lines, compare_lines, diff_fill, align_top_wrap):
+    paired_blocks = pair_promos(base_lines, compare_lines)
+    row = start_row
+    for b_block, c_block in paired_blocks:
+        row = write_lines_aligned_to_excel(ws, row, b_block, c_block, diff_fill, align_top_wrap)
+    return row
 
 
 def export_to_excel():
@@ -383,49 +429,41 @@ def export_to_excel():
         messagebox.showerror("Excel Load Error", str(e))
         return
 
-    # ลบชีทเดิมหากมี และสร้างชีทใหม่
     if "Comparison" in wb.sheetnames:
         del wb["Comparison"]
     ws = wb.create_sheet("Comparison")
 
-    # ปรับความกว้างคอลัมน์
     ws.column_dimensions["A"].width = 80
     ws.column_dimensions["B"].width = 80
     ws.column_dimensions["C"].width = 80
 
-    # ปรับความสูงแถว
     ws.row_dimensions[2].height = 140
 
-    # ✅ ดึงข้อมูลจาก GUI
     try:
-        raw_request = text_request.get("1.0", tk.END).strip()  # ข้อความดิบ (ไม่แปลง JSON)
+        raw_request = text_request.get("1.0", tk.END).strip()
         raw_newpro = text_base.get("1.0", tk.END).strip()
         raw_online = text_compare.get("1.0", tk.END).strip()
 
-        # พยายามแปลง JSON เฉพาะ Newpro
         try:
             newpro_obj = json.loads(raw_newpro) if raw_newpro else {}
             res_newpro_text = json.dumps(newpro_obj, ensure_ascii=False, indent=2)
         except Exception:
-            res_newpro_text = raw_newpro  # ถ้าแปลงไม่ได้ ใช้ข้อความดิบ
+            res_newpro_text = raw_newpro
 
-        # พยายามแปลง JSON เฉพาะ Online
         try:
             online_obj = json.loads(raw_online) if raw_online else {}
             res_online_text = json.dumps(online_obj, ensure_ascii=False, indent=2)
         except Exception:
-            res_online_text = raw_online  # ถ้าแปลงไม่ได้ ใช้ข้อความดิบ
+            res_online_text = raw_online
 
     except Exception as e:
         messagebox.showerror("Input Error", f"Unable to read inputs: {e}")
         return
 
-    # ✅ เขียน Header
     ws.cell(row=1, column=1, value="Request_Promotion")
     ws.cell(row=1, column=2, value="Newproengine_Response")
     ws.cell(row=1, column=3, value="LP_Response")
 
-    # ✅ เขียนข้อมูล JSON input และข้อความดิบแบบ 1 บรรทัด พร้อมจัดรูปแบบ alignment
     input_align = Alignment(vertical="top", horizontal="left", wrap_text=True)
 
     cell_req = ws.cell(row=2, column=1, value=raw_request)
@@ -437,15 +475,13 @@ def export_to_excel():
     cell_online = ws.cell(row=2, column=3, value=res_online_text)
     cell_online.alignment = input_align
 
-    # เว้นบรรทัดก่อนเริ่มเปรียบเทียบ
     ws.cell(row=3, column=1, value="")
 
-    # เขียน Header เปรียบเทียบ
     ws.cell(row=4, column=2, value="Newproengine_Diffrent")
     ws.cell(row=4, column=3, value="LP_Diffrent")
 
-    # เขียนข้อมูลเปรียบเทียบจาก GUI ต่อจากแถวที่ 5
-    write_lines_aligned_to_excel(ws, 5, base_lines, compare_lines, diff_fill, align_top_wrap)
+    # *** ใช้ฟังก์ชันใหม่ที่แยกบล็อกตาม key 'privilegePromoInfo'
+    write_promos_to_excel(ws, 5, base_lines, compare_lines, diff_fill, align_top_wrap)
 
     try:
         wb.save(EXCEL_PATH)
@@ -454,6 +490,7 @@ def export_to_excel():
         messagebox.showerror("Save Failed", "Permission denied. Please close the Excel file and try again.")
     except Exception as e:
         messagebox.showerror("Save Failed", f"An unexpected error occurred:\n{e}")
+
 
 
 # ----------------- Core Function: compare_json ----------------- #===================อย่าแก้ไขส่วนนี้ลงไป===================
