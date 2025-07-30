@@ -333,8 +333,8 @@ def write_lines_aligned_to_excel(ws, start_row, base_lines, compare_lines, diff_
             i += (i < len_b)
             j += (j < len_c)
 
-        cell_b = ws.cell(row=row, column=2, value=val_b)
-        cell_c = ws.cell(row=row, column=3, value=val_c)
+        cell_b = ws.cell(row=row, column=3, value=val_b)
+        cell_c = ws.cell(row=row, column=2, value=val_c)
         cell_b.alignment = align_top_wrap
         cell_c.alignment = align_top_wrap
 
@@ -671,17 +671,17 @@ frame_input.grid_columnconfigure(1, weight=1)  # Pro Engine
 frame_input.grid_rowconfigure(1, weight=1)     # ขยายความสูง
 
 # 📘 LP
-ttk.Label(frame_input, text="📘 LP", style="Header.TLabel").grid(row=0, column=0, sticky="w")
+ttk.Label(frame_input, text="📘 LP", style="Header.TLabel").grid(row=0, column=1, sticky="w")
 text_base = tk.Text(frame_input, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove", height=18)
-text_base.grid(row=2, column=0, sticky="nsew", padx=(0,5))
+text_base.grid(row=2, column=1, sticky="nsew", padx=(0,5))
 add_right_click_menu(text_base)
 bind_scroll(text_base)
 bind_paste_shortcuts(text_base)
 
 # 📙 Pro Engine
-ttk.Label(frame_input, text="📙 Pro Engine", style="Header.TLabel").grid(row=0, column=1, sticky="w")
+ttk.Label(frame_input, text="📙 Pro Engine", style="Header.TLabel").grid(row=0, column=0, sticky="w")
 text_compare = tk.Text(frame_input, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="groove", height=18)
-text_compare.grid(row=2, column=1, sticky="nsew", padx=(5,0))
+text_compare.grid(row=2, column=0, sticky="nsew", padx=(5,0))
 add_right_click_menu(text_compare)
 bind_scroll(text_compare)
 bind_paste_shortcuts(text_compare)
@@ -705,14 +705,14 @@ frame_output.grid_rowconfigure(1, weight=1)
 
 ttk.Label(frame_output, text="📘 LP Differences", style="Header.TLabel").grid(row=0, column=1, sticky="w")
 text_partial_base = tk.Text(frame_output, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="ridge")
-text_partial_base.grid(row=1, column=0, sticky="nsew", padx=(0, 5))
+text_partial_base.grid(row=1, column=1, sticky="nsew", padx=(0, 5))
 add_right_click_menu(text_partial_base)
 bind_scroll(text_partial_base)
 bind_paste_shortcuts(text_partial_base)
 
 ttk.Label(frame_output, text="📙 Pro Engine Differences", style="Header.TLabel").grid(row=0, column=0, sticky="w")
 text_partial_compare = tk.Text(frame_output, bg=TEXTBOX_BG, fg=DARK_TEXT, insertbackground="white", relief="ridge")
-text_partial_compare.grid(row=1, column=1, sticky="nsew", padx=(5, 0))
+text_partial_compare.grid(row=1, column=0, sticky="nsew", padx=(5, 0))
 add_right_click_menu(text_partial_compare)
 bind_scroll(text_partial_compare)
 bind_paste_shortcuts(text_partial_compare)
