@@ -193,7 +193,12 @@ def highlight_differences(text_widget, diff_paths):
 
 # ----------------- Global Variables -----------------
 EXPORT_FOLDER = os.path.join(os.getcwd(), "export")
-EXCEL_PATH = os.path.join(EXPORT_FOLDER, "Compare_Export.xlsx")
+if not os.path.exists(EXPORT_FOLDER):
+    try:
+        os.makedirs(EXPORT_FOLDER)
+    except Exception as e:
+        messagebox.showerror("Folder Creation Failed", f"Could not create the export folder:\n{e}")
+        raise
 
 # Create export folder if it doesn't exist
 if not os.path.exists(EXPORT_FOLDER):
@@ -420,8 +425,13 @@ def export_to_excel():
     align_top_wrap = Alignment(vertical="top", wrap_text=True)
 
     try:
-        if os.path.exists(EXCEL_PATH):
-            wb = load_workbook(EXCEL_PATH)
+        filename = filename_entry.get().strip()
+        if not filename:
+            filename = "Compare_Export"
+        excel_path = os.path.join(EXPORT_FOLDER, f"{filename}.xlsx")
+
+        if os.path.exists(excel_path):
+            wb = load_workbook(excel_path)
         else:
             wb = Workbook()
             wb.remove(wb.active)
@@ -469,10 +479,10 @@ def export_to_excel():
     cell_req = ws.cell(row=2, column=1, value=raw_request)
     cell_req.alignment = input_align
 
-    cell_newpro = ws.cell(row=2, column=2, value=res_newpro_text)
+    cell_newpro = ws.cell(row=2, column=3, value=res_newpro_text)
     cell_newpro.alignment = input_align
 
-    cell_online = ws.cell(row=2, column=3, value=res_online_text)
+    cell_online = ws.cell(row=2, column=2, value=res_online_text)
     cell_online.alignment = input_align
 
     ws.cell(row=3, column=1, value="")
@@ -480,12 +490,11 @@ def export_to_excel():
     ws.cell(row=4, column=2, value="Newproengine_Diffrent")
     ws.cell(row=4, column=3, value="LP_Diffrent")
 
-    # *** ใช้ฟังก์ชันใหม่ที่แยกบล็อกตาม key 'privilegePromoInfo'
     write_promos_to_excel(ws, 5, base_lines, compare_lines, diff_fill, align_top_wrap)
 
     try:
-        wb.save(EXCEL_PATH)
-        messagebox.showinfo("Export Successful", f"Excel file saved to:\n{EXCEL_PATH}")
+        wb.save(excel_path)
+        messagebox.showinfo("Export Successful", f"Excel file saved to:\n{excel_path}")
     except PermissionError:
         messagebox.showerror("Save Failed", "Permission denied. Please close the Excel file and try again.")
     except Exception as e:
@@ -688,6 +697,19 @@ bind_paste_shortcuts(text_compare)
 
 ttk.Button(root, text="🔍 Compare JSON", command=compare_json).grid(row=2, column=1, pady=10)
 
+# --- แถวแสดงผลลัพธ์ และช่องใส่ชื่อไฟล์ ---
+frame_row3 = ttk.Frame(root)
+frame_row3.grid(row=3, column=1, columnspan=2, sticky="ew", padx=10, pady=5)
+frame_row3.grid_columnconfigure(3, weight=0)  # ช่องใส่ชื่อไฟล์
+frame_row3.grid_columnconfigure(1, weight=1)  # ช่องเว้นระยะ
+frame_row3.grid_columnconfigure(2, weight=0)  # label_result
+
+# 🔤 ช่องใส่ชื่อไฟล์
+ttk.Label(frame_row3, text="📄 ชื่อไฟล์ (ไม่ต้องใส่ .xlsx):").grid(row=2, column=0, sticky="w", padx=(5, 5))
+filename_entry = ttk.Entry(frame_row3, width=30)
+filename_entry.grid(row=0, column=0, sticky="w", padx=(5, 0))  # ปรับระยะห่างจาก text_request
+
+# 🧾 label_result
 label_result = ttk.Label(root, text="", background=DARK_BG, font=("Segoe UI", 12, "bold"))
 label_result.grid(row=3, column=1, pady=5)
 
